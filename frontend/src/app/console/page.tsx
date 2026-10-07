@@ -400,14 +400,15 @@ export default function ConsolePage() {
 
             {/* Quick Link to User Flows Doc */}
             <div className="pt-2 border-t border-slate-100">
-              <Link
+              <a
                 href="/STAKEHOLDER_USER_FLOWS.md"
                 target="_blank"
+                rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-[#00264D]"
               >
                 <span>View User Flow Diagrams</span>
                 <ChevronRight className="size-3" />
-              </Link>
+              </a>
             </div>
           </div>
         </aside>

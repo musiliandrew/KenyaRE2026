@@ -54,6 +54,10 @@ export function RiskMap({
   // 1. Initialize Mapbox 3D Map
   useEffect(() => {
     if (!mapContainer.current) return;
+    if (!MAPBOX_TOKEN) {
+      console.warn("Mapbox public token is missing. Please set NEXT_PUBLIC_MAPBOX_TOKEN in your Vercel or local environment variables.");
+      return;
+    }
 
     mapboxgl.accessToken = MAPBOX_TOKEN;
 
@@ -423,6 +427,24 @@ export function RiskMap({
 
   return (
     <div className="relative h-full w-full overflow-hidden">
+      {!MAPBOX_TOKEN && (
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-900/90 p-6 text-center text-white backdrop-blur-sm">
+          <div className="size-12 rounded-full bg-[#D21245]/20 flex items-center justify-center text-[#D21245] mb-3">
+            <Compass className="size-6" />
+          </div>
+          <h3 className="text-lg font-bold text-white mb-1">Mapbox Public Token Required</h3>
+          <p className="max-w-md text-xs text-slate-300 mb-4 leading-relaxed">
+            To view the interactive 3D Nairobi pluvial flood map, add your Mapbox token as an environment variable in your Vercel Dashboard:
+          </p>
+          <div className="rounded-md bg-black/60 px-3 py-2 font-mono text-xs text-emerald-400 select-all border border-white/10">
+            NEXT_PUBLIC_MAPBOX_TOKEN = pk.eyJ1...
+          </div>
+          <p className="mt-3 text-[11px] text-slate-400">
+            Once saved in Vercel project settings, redeploy to see the full 3D building extrusions and terrain.
+          </p>
+        </div>
+      )}
+
       {/* 3D Mapbox Canvas */}
       <div ref={mapContainer} className="h-full w-full" />
 
