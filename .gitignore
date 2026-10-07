@@ -1,0 +1,21 @@
+# Dependencies & Build artifacts
+node_modules/
+.next/
+out/
+build/
+dist/
+
+# Environment files & secrets
+.env
+.env.local
+.env*.local
+
+# Local starter data & legacy flat exports
+cat-dashboard/
+lovableDemo/
+team_a_nairobi/
+
+# Logs & System
+*.log
+.DS_Store
+Thumbs.db

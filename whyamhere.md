@@ -1,0 +1,2 @@
+You have been selected to participate in the Kenya Re AI4I Hackathon 2026, scheduled for 7th to 9th October 2026.
+The hackathon provides a unique opportunity for university students from across Kenya to apply their skills in Artificial Intelligence (AI) and Machine Learning (ML) to real-world challenges.
