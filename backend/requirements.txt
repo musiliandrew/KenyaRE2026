@@ -1,0 +1,27 @@
+# Kenya Re CAT Modeling Backend Dependencies
+# Python 3.10+ / 3.11+ recommended
+
+# API Framework & Server
+fastapi>=0.110.0
+uvicorn[standard]>=0.28.0
+pydantic>=2.6.0
+pydantic-settings>=2.2.0
+
+# Geospatial & Raster Processing (Pillar 1: Hazard)
+rasterio>=1.3.9
+geopandas>=0.14.3
+shapely>=2.0.3
+pyproj>=3.6.1
+
+# Numerical & Data Analysis (Pillars 2, 3, 4: Vulnerability, Exposure, Financial Engine)
+numpy>=1.26.4
+pandas>=2.2.1
+scipy>=1.12.0
+
+# AI & LLM Ingestion Layer
+openai>=1.14.0
+tiktoken>=0.6.0
+
+# Utilities & Networking
+python-dotenv>=1.0.1
+httpx>=0.27.0
