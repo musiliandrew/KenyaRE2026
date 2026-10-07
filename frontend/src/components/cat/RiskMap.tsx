@@ -17,7 +17,10 @@ import {
 import { Layers, Compass, Eye, Sparkles } from "lucide-react";
 
 const MAPBOX_TOKEN =
-  process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
+  process.env.NEXT_PUBLIC_MAPBOX_TOKEN ||
+  process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN ||
+  process.env.MAPBOX_TOKEN ||
+  "";
 
 export function RiskMap({
   rp,
