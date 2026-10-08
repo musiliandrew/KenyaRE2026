@@ -12,6 +12,15 @@ import {
 } from "@/lib/api";
 import { Compass, Eye, Sparkles } from "lucide-react";
 
+if (typeof window !== "undefined") {
+  try {
+    const origin = window.location.origin || "";
+    maplibregl.setWorkerUrl(`${origin}/maplibre-gl-worker.mjs`);
+  } catch (err) {
+    console.warn("Could not set MapLibre worker URL at module scope:", err);
+  }
+}
+
 export function RiskMapDeckGL({
   rp = "100y",
   filter = "all",
@@ -73,6 +82,15 @@ export function RiskMapDeckGL({
   // Initialize MapLibre Map
   useEffect(() => {
     if (!mapContainer.current) return;
+
+    if (typeof window !== "undefined") {
+      try {
+        const origin = window.location.origin || "";
+        maplibregl.setWorkerUrl(`${origin}/maplibre-gl-worker.mjs`);
+      } catch (err) {
+        console.warn("Could not set MapLibre worker URL:", err);
+      }
+    }
 
     const map = new maplibregl.Map({
       container: mapContainer.current,
