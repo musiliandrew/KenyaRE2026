@@ -508,13 +508,15 @@ export function IngestTestDataModal({
       // Execute catastrophe risk pipeline on backend
       const modelRun = await api.runModel(activeScenario, applyAI, exposurePayload as any);
 
-      // Enrich frontend ExposureAssets with depth and damage ratios
+      // Enrich frontend ExposureAssets with exact backend calculated depth and damage ratios
       const totalTiv = rawAssetsToRun.reduce((acc, curr) => acc + curr.tiv_kes, 0);
-      const simulatedAssets: ExposureAsset[] = rawAssetsToRun.map((a, idx) => {
+      const simulatedAssets: ExposureAsset[] = rawAssetsToRun.map((a) => {
         const top = modelRun.top_losses?.find((t: any) => (t as any).loc_id === a.id);
-        const depth: number = typeof (top as any)?.depth_m === "number" ? Number((top as any).depth_m) : 0.2 + (idx % 5) * 0.32;
-        const damageRatio: number = Math.min(0.85, depth > 0 ? (depth / (depth + 1.2)) * 0.75 : 0.02);
-        const lossKes: number = a.tiv_kes * damageRatio;
+        const depth: number = typeof (top as any)?.depth_m === "number" ? Number((top as any).depth_m) : 0;
+        const damageRatio: number = typeof (top as any)?.damage_ratio === "number" ? Number((top as any).damage_ratio) : 0;
+        const lossKes: number = typeof (top as any)?.gross_loss_kes === "number" 
+          ? Number((top as any).gross_loss_kes) 
+          : (typeof (top as any)?.loss_kes === "number" ? Number((top as any).loss_kes) : a.tiv_kes * damageRatio);
 
         return {
           loc_id: a.id,
@@ -530,7 +532,7 @@ export function IngestTestDataModal({
           synthetic: false,
           hazard_score: Math.min(1.0, depth / 2.0),
           depth_m: depth,
-          tier_label: depth > 1.0 ? "Extreme Floodway" : depth > 0.4 ? "High Hazard" : "Moderate Pluvial",
+          tier_label: depth > 1.0 ? "Extreme Floodway" : depth > 0.4 ? "High Hazard" : depth > 0.05 ? "Moderate Pluvial" : "Low / Below Inundation Threshold",
           damage_ratio: damageRatio,
           loss_kes: lossKes,
           risk_level: (damageRatio > 0.35 ? "high" : damageRatio > 0.08 ? "mid" : "low") as "low" | "mid" | "high",

@@ -84,21 +84,22 @@ class FinancialEngine:
                 class_loss[hc] = class_loss.get(hc, 0.0) + prop_gross
                 ward_loss[ward] = ward_loss.get(ward, 0.0) + prop_gross
 
-                if prop_gross > 0:
-                    property_losses.append({
-                        "loc_id": asset.get("loc_id", "UNKNOWN"),
-                        "name": asset.get("name", "Asset"),
-                        "housing_class": hc,
-                        "ward": ward,
-                        "tiv_kes": tiv,
-                        "depth_m": round(depth, 3),
-                        "damage_ratio": ratio,
-                        "gross_loss_kes": round(prop_gross, 2),
-                        "insured_loss_kes": round(prop_insured, 2),
-                    })
+                # Always record evaluated asset with actual sampled depth and calculated vulnerability loss
+                property_losses.append({
+                    "loc_id": asset.get("loc_id") or asset.get("id", "UNKNOWN"),
+                    "name": asset.get("name", "Asset"),
+                    "housing_class": hc,
+                    "ward": ward,
+                    "tiv_kes": tiv,
+                    "depth_m": round(depth, 3),
+                    "damage_ratio": ratio,
+                    "gross_loss_kes": round(prop_gross, 2),
+                    "insured_loss_kes": round(prop_insured, 2),
+                })
 
-            # Sort top affected properties
+            # Sort properties by gross loss descending
             property_losses.sort(key=lambda x: x["gross_loss_kes"], reverse=True)
+            affected_count = sum(1 for p in property_losses if p["gross_loss_kes"] > 0)
 
             elt.append({
                 "return_period": rp,
@@ -112,8 +113,8 @@ class FinancialEngine:
                 "insured_loss_ratio": round(insured_loss / total_tiv if total_tiv > 0 else 0.0, 6),
                 "loss_by_class": {k: round(v, 2) for k, v in class_loss.items()},
                 "top_loss_wards": {k: round(v, 2) for k, v in sorted(ward_loss.items(), key=lambda i: i[1], reverse=True)[:5]},
-                "affected_property_count": len(property_losses),
-                "top_properties": property_losses[:10],
+                "affected_property_count": affected_count,
+                "top_properties": property_losses if assets is not None else property_losses[:50],
             })
 
         return elt

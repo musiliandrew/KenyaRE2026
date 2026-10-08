@@ -1251,11 +1251,17 @@ function HazardPanel({
                 <div className="text-lg sm:text-xl font-bold font-mono text-slate-900">{formatKES(selectedBuilding.tiv_kes)}</div>
               </div>
               <div className="text-right">
-                <span className="text-xs font-bold text-red-600 block">
-                  Loss: {formatKES(selectedBuilding.loss_kes || 0)} ({((selectedBuilding.damage_ratio || 0) * 100).toFixed(1)}%)
-                </span>
+                {(selectedBuilding.loss_kes || 0) > 0 ? (
+                  <span className="text-xs font-bold text-red-600 block">
+                    Loss: {formatKES(selectedBuilding.loss_kes || 0)} ({((selectedBuilding.damage_ratio || 0) * 100).toFixed(1)}%)
+                  </span>
+                ) : (
+                  <span className="text-xs font-bold text-emerald-700 block">
+                    Loss: KES 0 (0.0% · Below {selectedBuilding.housing_class === "concrete_rcc" ? "0.30m" : "0.25m"} Threshold)
+                  </span>
+                )}
                 <div className="text-[11px] text-slate-600 font-mono">
-                  Water Depth: <strong className="text-red-700">{(selectedBuilding.depth_m || 0).toFixed(2)} m</strong>
+                  Water Depth: <strong className={(selectedBuilding.loss_kes || 0) > 0 ? "text-red-700" : "text-slate-800"}>{(selectedBuilding.depth_m || 0).toFixed(2)} m</strong>
                 </div>
               </div>
             </div>
