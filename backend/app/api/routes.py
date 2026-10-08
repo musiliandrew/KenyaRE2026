@@ -106,21 +106,42 @@ def get_climada_matrix(req: List[Dict[str, float]]) -> Dict[str, Any]:
 # PILLAR 2: VULNERABILITY LAYER
 # ============================================================================
 
+from app.services.vulnerability_engine import vulnerability_engine
+
 @router.post("/vulnerability/calculate", response_model=DamageCalculationResponse, tags=["Pillar 2: Vulnerability"])
 def calculate_damage(req: DamageCalculationRequest):
     """
-    Calculates damage ratio and loss for a single asset given depth and housing class.
-    Uses JRC/Huizinga sigmoid depth-damage curves.
+    Calculates damage ratio and financial loss for a single asset given depth and housing class.
+    Uses continuous JRC/Huizinga sigmoid depth-damage curves with physical caps.
     """
-    result = calculate_asset_loss(req.tiv_kes, req.depth_m, req.housing_class.value)
+    res = vulnerability_engine.calculate_loss(req.tiv_kes, req.depth_m, req.housing_class.value)
     return DamageCalculationResponse(
-        housing_class=req.housing_class.value,
-        depth_m=req.depth_m,
-        tiv_kes=req.tiv_kes,
-        damage_ratio=result["damage_ratio"],
-        loss_kes=result["loss_kes"],
-        damage_cap_pct=result["damage_cap_pct"]
+        housing_class=res["housing_class"],
+        depth_m=res["depth_m"],
+        tiv_kes=res["tiv_kes"],
+        damage_ratio=res["damage_ratio"],
+        loss_kes=res["loss_kes"],
+        damage_cap_pct=res["cap_pct"]
     )
+
+
+@router.get("/vulnerability/curves", tags=["Pillar 2: Vulnerability"])
+def get_vulnerability_curves(max_depth_m: float = 4.0, step_m: float = 0.1) -> Dict[str, Any]:
+    """
+    Returns discretized evaluation points for all 4 construction classes for UI charting.
+    """
+    return {
+        "curves": vulnerability_engine.get_all_curves(max_depth_m, step_m),
+        "parameters": vulnerability_engine.curves
+    }
+
+
+@router.get("/vulnerability/climada-impact", tags=["Pillar 2: Vulnerability"])
+def get_climada_impact_functions() -> Dict[str, Any]:
+    """
+    Exports all 4 depth-damage functions formatted as CLIMADA ImpactFunc objects.
+    """
+    return vulnerability_engine.to_climada_impact_funcs()
 
 
 # ============================================================================
