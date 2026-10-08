@@ -1168,6 +1168,42 @@ function HazardPanel({
             />
           )}
         </div>
+
+        {/* Geospatial Map Legend Bar */}
+        <div className="border-t border-slate-200 bg-slate-50/90 px-3.5 py-2 flex flex-wrap items-center justify-between gap-3 text-[11px]">
+          <div className="flex items-center gap-4 flex-wrap">
+            <span className="font-bold text-[#00264D] uppercase text-[10px] tracking-wider">Legend:</span>
+            
+            <div className="flex items-center gap-1.5 text-slate-700">
+              <span className="w-4 h-1 rounded-full bg-[#0ea5e9] inline-block shadow-2xs"></span>
+              <span>Open Drains & Rivers</span>
+            </div>
+
+            <div className="flex items-center gap-1.5 text-slate-700">
+              <span className="w-4 h-1 rounded-full bg-[#ef4444] inline-block shadow-2xs"></span>
+              <span>AI Clogging Bottlenecks</span>
+            </div>
+
+            <div className="flex items-center gap-1.5 text-slate-700">
+              <span className="size-2 rounded-full bg-[#D21245] inline-block"></span>
+              <span>High Risk Assets</span>
+            </div>
+
+            <div className="flex items-center gap-1.5 text-slate-700">
+              <span className="size-2 rounded-full bg-[#16A34A] inline-block"></span>
+              <span>Low Risk Assets</span>
+            </div>
+
+            <div className="flex items-center gap-1.5 text-slate-700">
+              <span className="size-2.5 rounded-full border border-blue-400 bg-blue-100/50 inline-block"></span>
+              <span>Hotspot Centroids</span>
+            </div>
+          </div>
+
+          <div className="text-slate-500 font-medium text-[10px] flex items-center gap-1">
+            <span>💡 Click any drain line on the map to inspect capacity & clogging diagnosis</span>
+          </div>
+        </div>
       </div>
 
       {/* Selected Asset Detailed Dossier Card */}

@@ -12,7 +12,8 @@ import {
   type Hotspot,
   type RP,
 } from "@/lib/api";
-import { Layers, Compass, Eye, Sparkles } from "lucide-react";
+import { Layers, Compass, Eye, Sparkles, Waves } from "lucide-react";
+import { NAIROBI_DRAINAGE_GEOJSON } from "@/lib/drainageData";
 
 const MAPBOX_TOKEN =
   process.env.NEXT_PUBLIC_MAPBOX_TOKEN ||
@@ -47,6 +48,7 @@ export function RiskMap({
   const map = useRef<mapboxgl.Map | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [is3D, setIs3D] = useState(true);
+  const [showDrains, setShowDrains] = useState(true);
   const [mapStyle, setMapStyle] = useState<"light" | "dark" | "satellite">("light");
 
   const [assets, setAssets] = useState<ExposureAsset[]>(propAssets || []);
@@ -275,7 +277,7 @@ export function RiskMap({
       renderLayers(map.current);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [normRP, filter, showHotspots, selectedBuilding, selectedHotspot, mapLoaded, assets, hotspots]);
+  }, [normRP, filter, showHotspots, showDrains, selectedBuilding, selectedHotspot, mapLoaded, assets, hotspots]);
 
   function renderLayers(m: mapboxgl.Map) {
     // --- BUILDINGS GEOJSON ---
@@ -525,6 +527,119 @@ export function RiskMap({
         m.getCanvas().style.cursor = "";
       });
     }
+
+    // --- DRAINAGE & STORMWATER NETWORK GEOJSON ---
+    const drainageSourceData = showDrains
+      ? NAIROBI_DRAINAGE_GEOJSON
+      : { type: "FeatureCollection", features: [] };
+
+    if (m.getSource("drainage-source")) {
+      (m.getSource("drainage-source") as mapboxgl.GeoJSONSource).setData(drainageSourceData as any);
+    } else {
+      m.addSource("drainage-source", {
+        type: "geojson",
+        data: drainageSourceData as any,
+      });
+
+      // 1. Soft Outer Glow Layer for Waterways
+      m.addLayer({
+        id: "drainage-lines-glow",
+        type: "line",
+        source: "drainage-source",
+        layout: {
+          "line-join": "round",
+          "line-cap": "round",
+        },
+        paint: {
+          "line-color": [
+            "case",
+            ["==", ["get", "ai_bottleneck"], true],
+            "#f59e0b",
+            "#0284c7",
+          ],
+          "line-width": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            11, 4,
+            16, 9,
+          ],
+          "line-opacity": 0.32,
+        },
+      });
+
+      // 2. High-Contrast Crisp Vector Line
+      m.addLayer({
+        id: "drainage-lines-main",
+        type: "line",
+        source: "drainage-source",
+        layout: {
+          "line-join": "round",
+          "line-cap": "round",
+        },
+        paint: {
+          "line-color": [
+            "case",
+            ["==", ["get", "ai_bottleneck"], true],
+            "#ef4444",
+            "#0ea5e9",
+          ],
+          "line-width": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            11, 2.0,
+            16, 4.2,
+          ],
+          "line-opacity": 0.95,
+        },
+      });
+
+      // Interactive Click Popup on Drainage Channel
+      m.on("click", "drainage-lines-main", (e) => {
+        if (!e.features || !e.features[0]) return;
+        const p = e.features[0].properties as any;
+        if (!p) return;
+
+        const isBottleneck = p.ai_bottleneck === "true" || p.ai_bottleneck === true;
+        const statusBadge = isBottleneck
+          ? `<div style="display:inline-block;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:700;margin:3px 0;">⚠️ AI Siltation Choke Point · High Overtopping Probability</div>`
+          : `<div style="display:inline-block;background:#F0FDF4;color:#16A34A;border:1px solid #BBF7D0;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:700;margin:3px 0;">✓ Open Flow Artery</div>`;
+
+        new mapboxgl.Popup({ offset: 10, closeButton: true, className: "kenya-re-drain-popup" })
+          .setLngLat(e.lngLat)
+          .setHTML(`
+            <div style="font-family: system-ui, -apple-system, sans-serif; font-size: 12px; color: #1E293B; min-width: 220px; padding: 2px;">
+              <div style="font-weight: 700; color: #00264D; font-size: 13px; line-height: 1.25;">💧 ${p.name}</div>
+              <div style="color: #64748B; font-size: 11px; margin-top: 1px;">Type: <strong style="color: #0F172A;">${p.type_label}</strong></div>
+              ${statusBadge}
+              <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 6px; font-size: 11px; margin-top: 4px;">
+                <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
+                  <span style="color: #64748B;">Catchment:</span>
+                  <strong style="color: #0F172A;">${p.catchment}</strong>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
+                  <span style="color: #64748B;">Peak Discharge:</span>
+                  <strong style="color: #0284C7; font-family: monospace;">${p.capacity_m3s} m³/s</strong>
+                </div>
+                <div style="display:flex; justify-content:space-between;">
+                  <span style="color: #64748B;">Channel Width:</span>
+                  <strong style="color: #0F172A; font-family: monospace;">${p.width_m} m</strong>
+                </div>
+              </div>
+              <p style="color: #475569; font-size: 10.5px; margin-top: 5px; line-height: 1.35;">${p.description}</p>
+            </div>
+          `)
+          .addTo(m);
+      });
+
+      m.on("mouseenter", "drainage-lines-main", () => {
+        m.getCanvas().style.cursor = "pointer";
+      });
+      m.on("mouseleave", "drainage-lines-main", () => {
+        m.getCanvas().style.cursor = "";
+      });
+    }
   }
 
   return (
@@ -563,6 +678,19 @@ export function RiskMap({
           title="Toggle 3D Perspective Tilt"
         >
           <Compass className="size-3.5" /> {is3D ? "3D Perspective" : "2D Flat"}
+        </button>
+
+        {/* Drainage Network Toggle */}
+        <button
+          onClick={() => setShowDrains(!showDrains)}
+          className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold transition cursor-pointer ${
+            showDrains
+              ? "bg-[#0ea5e9] text-white shadow-xs"
+              : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+          }`}
+          title="Toggle Urban Stormwater Drains & Canals"
+        >
+          <Waves className="size-3.5" /> Drains: {showDrains ? "ON" : "OFF"}
         </button>
 
         {/* Style Selector */}
