@@ -100,6 +100,20 @@ export const ROLE_PERMISSIONS: Record<UserRole, RolePermissions> = {
     canExportBrief: true,
     canViewAllAssumptions: true,
   },
+  guest: {
+    canPricePolicies: true,
+    canViewEP: true,
+    canViewVulnerability: true,
+    canViewModelParams: true,
+    canViewMap: true,
+    canViewHotspots: true,
+    canRunStressTests: true,
+    canSetSublimits: true,
+    canAuditDrainage: true,
+    canViewTreaty: true,
+    canExportBrief: true,
+    canViewAllAssumptions: true,
+  },
 };
 
 export function hasPermission(role: UserRole, permission: keyof RolePermissions): boolean {

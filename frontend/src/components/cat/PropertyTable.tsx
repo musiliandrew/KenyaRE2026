@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Table,
   TableBody,
@@ -89,12 +89,27 @@ const MOCK_PROPERTIES: Property[] = [
 export function PropertyTable() {
   const [searchQuery, setSearchQuery] = useState("");
   const [properties] = useState<Property[]>(MOCK_PROPERTIES);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 5;
 
   const filteredProperties = properties.filter(
     (prop) =>
       prop.location.toLowerCase().includes(searchQuery.toLowerCase()) ||
       prop.housingClass.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const totalPages = Math.ceil(filteredProperties.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedProperties = filteredProperties.slice(startIndex, startIndex + itemsPerPage);
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+  };
+
+  // Reset to page 1 when search query changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery]);
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat("en-KE", {
@@ -154,14 +169,14 @@ export function PropertyTable() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredProperties.length === 0 ? (
+              {paginatedProperties.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={7} className="text-center py-8 text-slate-500">
                     No properties found matching your search.
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredProperties.map((property) => {
+                paginatedProperties.map((property) => {
                   const risk = getRiskLevel(property.hazardScore);
                   return (
                     <TableRow key={property.id}>
@@ -202,13 +217,48 @@ export function PropertyTable() {
       {/* Pagination */}
       <div className="flex items-center justify-between text-sm text-slate-600">
         <div>
-          Showing {filteredProperties.length} of {properties.length} properties
+          Showing {startIndex + 1}-{Math.min(startIndex + itemsPerPage, filteredProperties.length)} of {filteredProperties.length} properties
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" disabled>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handlePageChange(currentPage - 1)}
+            disabled={currentPage === 1}
+          >
             Previous
           </Button>
-          <Button variant="outline" size="sm" disabled>
+          <div className="flex gap-1">
+            {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+              let pageNum;
+              if (totalPages <= 5) {
+                pageNum = i + 1;
+              } else if (currentPage <= 3) {
+                pageNum = i + 1;
+              } else if (currentPage >= totalPages - 2) {
+                pageNum = totalPages - 4 + i;
+              } else {
+                pageNum = currentPage - 2 + i;
+              }
+              return (
+                <Button
+                  key={pageNum}
+                  variant={currentPage === pageNum ? "default" : "outline"}
+                  size="sm"
+                  className={currentPage === pageNum ? "bg-[#00264D] hover:bg-[#00264D]/90" : ""}
+                  onClick={() => handlePageChange(pageNum)}
+                >
+                  {pageNum}
+                </Button>
+              );
+            })}
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handlePageChange(currentPage + 1)}
+            disabled={currentPage === totalPages}
+          >
             Next
           </Button>
         </div>

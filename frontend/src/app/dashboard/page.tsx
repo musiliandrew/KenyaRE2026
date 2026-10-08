@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import {
@@ -25,6 +25,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { AnimatedNumber } from "@/components/cat/AnimatedNumber";
 import { EPChart } from "@/components/cat/EPChart";
+import { VulnerabilityCurves } from "@/components/cat/VulnerabilityCurves";
+import { MapProviderSwitcher, type MapProvider } from "@/components/cat/MapProviderSwitcher";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   AAL,
@@ -36,9 +38,21 @@ import {
   type HousingClass,
 } from "@/lib/cat-model";
 
-// Dynamically import RiskMap to avoid SSR issues
-const RiskMap = dynamic(
+// Dynamically import map components to avoid SSR issues
+const RiskMapMapbox = dynamic(
   () => import("@/components/cat/RiskMap").then((mod) => mod.RiskMap),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-full w-full items-center justify-center bg-slate-100 text-sm text-slate-500">
+        Loading map...
+      </div>
+    ),
+  }
+);
+
+const RiskMapDeckGL = dynamic(
+  () => import("@/components/cat/RiskMapDeckGL").then((mod) => mod.RiskMapDeckGL),
   {
     ssr: false,
     loading: () => (
@@ -293,6 +307,7 @@ function OverviewPanel({ scenario }: { scenario: ReturnPeriod }) {
 
 function HazardPanel({ scenario }: { scenario: ReturnPeriod }) {
   const [selectedBuilding, setSelectedBuilding] = useState<any>(null);
+  const [mapProvider, setMapProvider] = useState<MapProvider>("mapbox");
 
   return (
     <div className="space-y-6">
@@ -303,17 +318,39 @@ function HazardPanel({ scenario }: { scenario: ReturnPeriod }) {
         </p>
       </div>
 
+      <div className="flex items-center justify-between">
+        <div className="text-sm text-slate-600">
+          Switch between Mapbox GL and MapLibre GL + deck.gl to compare performance
+        </div>
+        <MapProviderSwitcher
+          currentProvider={mapProvider}
+          onProviderChange={setMapProvider}
+        />
+      </div>
+
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div className="h-[500px]">
-          <RiskMap
-            rp={scenario}
-            filter="all"
-            showHotspots={true}
-            selectedBuilding={selectedBuilding}
-            selectedHotspot={null}
-            onSelectBuilding={setSelectedBuilding}
-            onSelectHotspot={() => {}}
-          />
+          {mapProvider === "mapbox" ? (
+            <RiskMapMapbox
+              rp={scenario}
+              filter="all"
+              showHotspots={true}
+              selectedBuilding={selectedBuilding}
+              selectedHotspot={null}
+              onSelectBuilding={setSelectedBuilding}
+              onSelectHotspot={() => {}}
+            />
+          ) : (
+            <RiskMapDeckGL
+              rp={scenario}
+              filter="all"
+              showHotspots={true}
+              selectedBuilding={selectedBuilding}
+              selectedHotspot={null}
+              onSelectBuilding={setSelectedBuilding}
+              onSelectHotspot={() => {}}
+            />
+          )}
         </div>
       </div>
 
@@ -342,10 +379,8 @@ function VulnerabilityPanel() {
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h3 className="text-lg font-bold text-[#00264D] mb-4">Damage Ratio vs Hazard Score</h3>
-        <div className="h-80 flex items-center justify-center bg-slate-50 rounded-lg">
-          <p className="text-slate-500">Vulnerability curves visualization</p>
-        </div>
+        <h3 className="text-lg font-bold text-[#00264D] mb-4">Damage Ratio vs Flood Depth</h3>
+        <VulnerabilityCurves />
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -388,6 +423,17 @@ function VulnerabilityPanel() {
 }
 
 function ExposurePanel() {
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
+
+  const totalPages = Math.ceil(BUILDINGS.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedBuildings = BUILDINGS.slice(startIndex, startIndex + itemsPerPage);
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -419,7 +465,7 @@ function ExposurePanel() {
               </tr>
             </thead>
             <tbody>
-              {BUILDINGS.slice(0, 20).map((b) => (
+              {paginatedBuildings.map((b) => (
                 <tr key={b.id} className="border-b border-slate-100 hover:bg-slate-50">
                   <td className="px-4 py-2 font-mono text-slate-700">{b.id}</td>
                   <td className="px-4 py-2 text-slate-900">{b.ward}</td>
@@ -435,6 +481,56 @@ function ExposurePanel() {
               ))}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {/* Pagination */}
+      <div className="flex items-center justify-between text-sm text-slate-600">
+        <div>
+          Showing {startIndex + 1}-{Math.min(startIndex + itemsPerPage, BUILDINGS.length)} of {BUILDINGS.length} buildings
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handlePageChange(currentPage - 1)}
+            disabled={currentPage === 1}
+          >
+            Previous
+          </Button>
+          <div className="flex gap-1">
+            {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+              let pageNum;
+              if (totalPages <= 5) {
+                pageNum = i + 1;
+              } else if (currentPage <= 3) {
+                pageNum = i + 1;
+              } else if (currentPage >= totalPages - 2) {
+                pageNum = totalPages - 4 + i;
+              } else {
+                pageNum = currentPage - 2 + i;
+              }
+              return (
+                <Button
+                  key={pageNum}
+                  variant={currentPage === pageNum ? "default" : "outline"}
+                  size="sm"
+                  className={currentPage === pageNum ? "bg-[#00264D] hover:bg-[#00264D]/90" : ""}
+                  onClick={() => handlePageChange(pageNum)}
+                >
+                  {pageNum}
+                </Button>
+              );
+            })}
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handlePageChange(currentPage + 1)}
+            disabled={currentPage === totalPages}
+          >
+            Next
+          </Button>
         </div>
       </div>
     </div>
