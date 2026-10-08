@@ -151,3 +151,47 @@ class BriefingResponse(BaseModel):
     key_findings: List[str]
     recommendations: List[str]
     disclaimer: str
+
+
+class XoLTreatyRequest(BaseModel):
+    attachment_kes: float = Field(..., gt=0, description="Attachment point in KES (e.g. 50,000,000)")
+    limit_kes: float = Field(..., gt=0, description="Treaty layer limit in KES (e.g. 100,000,000)")
+    share_pct: float = Field(default=1.0, ge=0.0, le=1.0, description="Treaty participation share (0.0 to 1.0, e.g. 1.0 = 100%)")
+    apply_ai_drainage: bool = Field(default=False, description="Stress-test layer with AI drainage gap penalties")
+
+
+class XoLTreatyResponse(BaseModel):
+    layer_name: str
+    attachment_kes: float
+    limit_kes: float
+    share_pct: float
+    layer_aal_kes: float
+    rate_on_line_pct: float
+    technical_pure_premium_kes: float
+    recommended_treaty_premium_kes: float
+    layer_event_outcomes: List[Dict[str, Any]]
+
+
+class FacultativeQuoteRequest(BaseModel):
+    tiv_kes: float = Field(..., gt=0, description="Total Insured Value in KES")
+    lat: float = Field(..., ge=-90, le=90)
+    lng: float = Field(..., ge=-180, le=180)
+    housing_class: HousingClass
+    deductible_pct: float = Field(default=0.05, ge=0.0, le=0.5, description="Policy deductible percentage (e.g. 0.05 = 5%)")
+
+
+class FacultativeQuoteResponse(BaseModel):
+    tiv_kes: float
+    lat: float
+    lon: float
+    housing_class: str
+    deductible_pct: float
+    deductible_kes: float
+    asset_aal_gross_kes: float
+    asset_aal_insured_kes: float
+    pure_rate_pct: float
+    recommended_technical_rate_pct: float
+    recommended_annual_premium_kes: float
+    depth_100y_m: float
+    insured_loss_100y_kes: float
+

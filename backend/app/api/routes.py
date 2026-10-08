@@ -7,8 +7,11 @@ from app.models.schemas import (
     RunModelRequest, RunModelResponse,
     NLPParseRequest, NLPParseResponse,
     BriefingRequest, BriefingResponse,
-    ExposureUpload, ExposureAsset
+    ExposureUpload, ExposureAsset,
+    XoLTreatyRequest, XoLTreatyResponse,
+    FacultativeQuoteRequest, FacultativeQuoteResponse
 )
+from app.services.financial_engine import financial_engine
 from app.services.cat_engine import (
     calculate_jrc_damage_ratio, calculate_asset_loss,
     calculate_portfolio_loss, compute_ep_curve, calculate_aal,
@@ -218,7 +221,7 @@ def upload_exposure(upload: ExposureUpload):
 
 
 @router.get("/portfolio/assets", tags=["Pillar 3: Exposure"])
-def get_exposure_assets(limit: int = 100):
+def get_portfolio_synthetic_assets(limit: int = 100):
     """
     Returns exposure assets from the synthetic portfolio.
     """
@@ -249,18 +252,71 @@ def get_hotspots():
 @router.get("/curves/ep", response_model=EPCurveResponse, tags=["Pillar 4: Financial Engine"])
 def get_ep_curve(ai_enabled: bool = True):
     """
-    Returns Exceedance Probability (EP) curve data across all return periods.
+    Returns Exceedance Probability (EP) curve data and trapezoidal AAL across all 5 calibrated return periods.
+    Powered by the Module 4 Financial Engine with GeoTIFF raster event sampling.
     """
-    assets = get_synthetic_exposure()
-    metrics = compute_ep_curve(assets, apply_ai=ai_enabled)
-    total_tiv = sum(asset["tiv_kes"] for asset in assets)
-    aal = calculate_aal(assets, apply_ai=ai_enabled)
-    
+    ep_data = financial_engine.calculate_ep_curve(apply_ai_drainage=ai_enabled)
+    metrics = [
+        ReturnPeriodMetric(
+            return_period=m["return_period"],
+            years=m["years"],
+            annual_prob=m["annual_prob"],
+            portfolio_loss_kes=m["gross_loss_kes"],
+            loss_ratio=m["loss_ratio"],
+            pml_90=m["pml_90"],
+        )
+        for m in ep_data["ep_curve"]
+    ]
     return EPCurveResponse(
-        metrics=[ReturnPeriodMetric(**m) for m in metrics],
-        total_tiv_kes=total_tiv,
-        aal_kes=aal,
+        metrics=metrics,
+        total_tiv_kes=ep_data["total_tiv_kes"],
+        aal_kes=ep_data["aal_gross_kes"],
         ai_enabled=ai_enabled
+    )
+
+
+@router.post("/reinsurance/xol", response_model=XoLTreatyResponse, tags=["Pillar 4: Financial Engine"])
+def price_xol_treaty(req: XoLTreatyRequest):
+    """
+    Prices an Excess of Loss (XOL) Reinsurance Treaty layer with pure burn rate,
+    capital margin, and return-period exhaustion tracking.
+    """
+    res = financial_engine.price_reinsurance_xol(
+        attachment_kes=req.attachment_kes,
+        limit_kes=req.limit_kes,
+        share_pct=req.share_pct,
+        apply_ai_drainage=req.apply_ai_drainage
+    )
+    return XoLTreatyResponse(**res)
+
+
+@router.post("/quotes/facultative", response_model=FacultativeQuoteResponse, tags=["Pillar 4: Financial Engine"])
+def quote_facultative_slip(req: FacultativeQuoteRequest):
+    """
+    Calculates technical pure risk premium, deductible retention, and underwriting rates
+    for an individual policy slip (e.g. Landmark Plaza Upper Hill from testData.md).
+    """
+    res = financial_engine.quote_single_slip_facultative(
+        tiv_kes=req.tiv_kes,
+        lat=req.lat,
+        lon=req.lng,
+        housing_class=req.housing_class.value,
+        deductible_pct=req.deductible_pct
+    )
+    return FacultativeQuoteResponse(
+        tiv_kes=res["tiv_kes"],
+        lat=res["lat"],
+        lon=res["lon"],
+        housing_class=res["housing_class"],
+        deductible_pct=res["deductible_pct"],
+        deductible_kes=res["deductible_kes"],
+        asset_aal_gross_kes=res["asset_aal_gross_kes"],
+        asset_aal_insured_kes=res["asset_aal_insured_kes"],
+        pure_rate_pct=res["pure_rate_pct"],
+        recommended_technical_rate_pct=res["recommended_technical_rate_pct"],
+        recommended_annual_premium_kes=res["recommended_annual_premium_kes"],
+        depth_100y_m=res["100y_extreme_depth_m"],
+        insured_loss_100y_kes=res["100y_extreme_loss_kes"]
     )
 
 
@@ -305,6 +361,7 @@ def run_model(req: RunModelRequest):
         top_losses=result["top_losses"],
         ep_curve=[ReturnPeriodMetric(**m) for m in ep_curve]
     )
+
 
 
 # ============================================================================

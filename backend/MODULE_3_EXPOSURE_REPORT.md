@@ -73,3 +73,4 @@ The automated test suite (`backend/tests/test_exposure_module.py`) executed five
 - `GET /api/exposure/stats`: Capital breakdown by class and ward.
 - `GET /api/exposure/climada-entity`: Native CLIMADA Exposures dictionary.
 - `POST /api/portfolio/upload`: Oasis OED upload and validation endpoint.
+
