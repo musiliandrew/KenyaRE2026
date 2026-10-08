@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useMemo } from "react";
 import {
   Table,
   TableBody,
@@ -12,252 +12,199 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SearchBar } from "@/components/cat/SearchBar";
-import {
-  Search,
-  Filter,
-  Download,
-  Plus,
-  Edit,
-  Trash2,
-  Eye,
-} from "lucide-react";
+import { Download, Loader2 } from "lucide-react";
+import { api, formatKES, CLASS_LABEL, type ExposureAsset, type RP } from "@/lib/api";
+import { useApi } from "@/hooks/useApi";
 
-interface Property {
-  id: string;
-  location: string;
-  housingClass: string;
-  floorArea: number;
-  costPerM2: number;
-  tiv: number;
-  hazardScore: number;
-  estimatedLoss: number;
-}
-
-const MOCK_PROPERTIES: Property[] = [
-  {
-    id: "1",
-    location: "Kayole, Nairobi",
-    housingClass: "Informal Iron Sheet",
-    floorArea: 45,
-    costPerM2: 15000,
-    tiv: 675000,
-    hazardScore: 0.85,
-    estimatedLoss: 573750,
-  },
-  {
-    id: "2",
-    location: "Mathare, Nairobi",
-    housingClass: "Semi-Permanent",
-    floorArea: 60,
-    costPerM2: 25000,
-    tiv: 1500000,
-    hazardScore: 0.72,
-    estimatedLoss: 720000,
-  },
-  {
-    id: "3",
-    location: "Dandora, Nairobi",
-    housingClass: "Permanent Masonry",
-    floorArea: 80,
-    costPerM2: 35000,
-    tiv: 2800000,
-    hazardScore: 0.45,
-    estimatedLoss: 420000,
-  },
-  {
-    id: "4",
-    location: "Westlands, Nairobi",
-    housingClass: "Concrete RCC",
-    floorArea: 120,
-    costPerM2: 50000,
-    tiv: 6000000,
-    hazardScore: 0.25,
-    estimatedLoss: 300000,
-  },
-  {
-    id: "5",
-    location: "Kibera, Nairobi",
-    housingClass: "Informal Iron Sheet",
-    floorArea: 35,
-    costPerM2: 12000,
-    tiv: 420000,
-    hazardScore: 0.92,
-    estimatedLoss: 386400,
-  },
-];
-
-export function PropertyTable() {
+export function PropertyTable({
+  assets: propAssets,
+  returnPeriod,
+  rp,
+}: {
+  assets?: ExposureAsset[];
+  returnPeriod?: RP;
+  rp?: RP;
+}) {
+  const activeRP = rp || returnPeriod || "100y";
   const [searchQuery, setSearchQuery] = useState("");
-  const [properties] = useState<Property[]>(MOCK_PROPERTIES);
+  const [selectedClass, setSelectedClass] = useState<string>("all");
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 5;
+  const itemsPerPage = 10;
 
-  const filteredProperties = properties.filter(
-    (prop) =>
-      prop.location.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      prop.housingClass.toLowerCase().includes(searchQuery.toLowerCase())
+  // Fetch real assets if not passed via props
+  const { data, loading } = useApi(
+    () => (propAssets ? Promise.resolve({ assets: propAssets }) : api.exposureAssets(activeRP, { limit: 1000 })),
+    [propAssets, activeRP]
   );
 
-  const totalPages = Math.ceil(filteredProperties.length / itemsPerPage);
+  const assets = useMemo(() => propAssets || data?.assets || [], [propAssets, data]);
+
+  const filtered = useMemo(() => {
+    return assets.filter((p) => {
+      const matchSearch =
+        searchQuery === "" ||
+        p.loc_id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.ward.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (p.name && p.name.toLowerCase().includes(searchQuery.toLowerCase()));
+
+      const matchClass = selectedClass === "all" || p.housing_class === selectedClass;
+      return matchSearch && matchClass;
+    });
+  }, [assets, searchQuery, selectedClass]);
+
+  const totalPages = Math.ceil(filtered.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
-  const paginatedProperties = filteredProperties.slice(startIndex, startIndex + itemsPerPage);
+  const paginated = filtered.slice(startIndex, startIndex + itemsPerPage);
 
-  const handlePageChange = (page: number) => {
-    setCurrentPage(page);
-  };
-
-  // Reset to page 1 when search query changes
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery]);
-
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat("en-KE", {
-      style: "currency",
-      currency: "KES",
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value);
-  };
-
-  const getRiskLevel = (score: number) => {
-    if (score >= 0.7) return { label: "High", color: "bg-red-100 text-red-700" };
-    if (score >= 0.4) return { label: "Medium", color: "bg-amber-100 text-amber-700" };
-    return { label: "Low", color: "bg-green-100 text-green-700" };
+  const handleExportCSV = () => {
+    if (!filtered.length) return;
+    const headers = ["Loc_ID", "Name", "Ward", "Housing_Class", "Floor_Area_M2", "TIV_KES", "Hazard_Depth_M", "Modeled_Loss_KES", "Risk_Level"];
+    const rows = filtered.map((a) => [
+      a.loc_id,
+      `"${a.name || "Asset"}"`,
+      `"${a.ward}"`,
+      a.housing_class,
+      a.floor_area_m2,
+      a.tiv_kes,
+      a.depth_m,
+      a.loss_kes,
+      a.risk_level,
+    ]);
+    const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `kenya-re-exposure-${returnPeriod}-${Date.now()}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
     <div className="space-y-4">
-      {/* Header with actions */}
-      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-        <div className="flex-1 w-full sm:w-auto">
+      {/* Search and Filters */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="w-full sm:w-80">
           <SearchBar
             value={searchQuery}
-            onChange={setSearchQuery}
-            placeholder="Search properties by location or type..."
+            onChange={(q) => {
+              setSearchQuery(q);
+              setCurrentPage(1);
+            }}
+            placeholder="Search by ID, Ward or Name..."
           />
         </div>
-        <div className="flex gap-2 w-full sm:w-auto">
-          <Button variant="outline" size="sm">
-            <Filter className="size-4 mr-2" />
-            Filters
-          </Button>
-          <Button variant="outline" size="sm">
-            <Download className="size-4 mr-2" />
-            Export
-          </Button>
-          <Button size="sm" className="bg-[#D21245] hover:bg-[#B50F3B]">
-            <Plus className="size-4 mr-2" />
-            Add Property
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <select
+            value={selectedClass}
+            onChange={(e) => {
+              setSelectedClass(e.target.value);
+              setCurrentPage(1);
+            }}
+            className="px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:ring-1 focus:ring-[#00264D] outline-none"
+          >
+            <option value="all">All Housing Typologies</option>
+            <option value="informal_iron_sheet">Informal Iron Sheet</option>
+            <option value="semi_permanent">Semi-Permanent</option>
+            <option value="permanent_masonry">Permanent Masonry</option>
+            <option value="concrete_rcc">Concrete RCC</option>
+          </select>
+
+          <Button variant="outline" size="sm" onClick={handleExportCSV} className="gap-1.5 text-xs">
+            <Download className="size-3.5" />
+            Export CSV
           </Button>
         </div>
       </div>
 
-      {/* Data Table */}
-      <div className="rounded-lg border border-slate-200 bg-white overflow-hidden">
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Location</TableHead>
-                <TableHead>Housing Class</TableHead>
-                <TableHead className="text-right">Floor Area (m²)</TableHead>
-                <TableHead className="text-right">TIV (KES)</TableHead>
-                <TableHead className="text-center">Risk Level</TableHead>
-                <TableHead className="text-right">Est. Loss</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {paginatedProperties.length === 0 ? (
+      {/* Real Assets Table */}
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        {loading && !assets.length ? (
+          <div className="h-64 flex items-center justify-center">
+            <Loader2 className="size-6 text-[#00264D] animate-spin" />
+            <span className="ml-2 text-sm text-slate-500">Loading exposure assets from Exposure Engine...</span>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader className="bg-slate-50 border-b border-slate-200">
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-slate-500">
-                    No properties found matching your search.
-                  </TableCell>
+                  <TableHead className="font-semibold text-slate-900 text-xs">Asset ID</TableHead>
+                  <TableHead className="font-semibold text-slate-900 text-xs">Administrative Ward</TableHead>
+                  <TableHead className="font-semibold text-slate-900 text-xs">Typology</TableHead>
+                  <TableHead className="font-semibold text-slate-900 text-xs">Floor Area</TableHead>
+                  <TableHead className="font-semibold text-slate-900 text-xs">TIV (KES)</TableHead>
+                  <TableHead className="font-semibold text-slate-900 text-xs">Flood Depth</TableHead>
+                  <TableHead className="font-semibold text-slate-900 text-xs">Loss (KES)</TableHead>
+                  <TableHead className="font-semibold text-slate-900 text-xs text-right">Risk Tier</TableHead>
                 </TableRow>
-              ) : (
-                paginatedProperties.map((property) => {
-                  const risk = getRiskLevel(property.hazardScore);
-                  return (
-                    <TableRow key={property.id}>
-                      <TableCell className="font-medium">{property.location}</TableCell>
-                      <TableCell>{property.housingClass}</TableCell>
-                      <TableCell className="text-right">{property.floorArea}</TableCell>
-                      <TableCell className="text-right font-mono">
-                        {formatCurrency(property.tiv)}
+              </TableHeader>
+              <TableBody>
+                {paginated.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center py-8 text-sm text-slate-500">
+                      No matching properties found.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  paginated.map((prop) => (
+                    <TableRow key={prop.loc_id} className="hover:bg-slate-50 text-xs">
+                      <TableCell className="font-mono font-medium text-slate-800">{prop.loc_id}</TableCell>
+                      <TableCell className="text-slate-900 font-medium">{prop.ward}</TableCell>
+                      <TableCell className="text-slate-600">
+                        {CLASS_LABEL[prop.housing_class] || prop.housing_class}
                       </TableCell>
-                      <TableCell className="text-center">
-                        <Badge className={risk.color}>{risk.label}</Badge>
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-red-600">
-                        {formatCurrency(property.estimatedLoss)}
-                      </TableCell>
+                      <TableCell className="font-mono text-slate-600">{prop.floor_area_m2.toLocaleString()} m²</TableCell>
+                      <TableCell className="font-mono font-medium text-[#00264D]">{formatKES(prop.tiv_kes)}</TableCell>
+                      <TableCell className="font-mono text-slate-700">{prop.depth_m.toFixed(2)} m</TableCell>
+                      <TableCell className="font-mono text-red-700 font-medium">{formatKES(prop.loss_kes)}</TableCell>
                       <TableCell className="text-right">
-                        <div className="flex justify-end gap-1">
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
-                            <Eye className="size-4" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
-                            <Edit className="size-4" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-red-600 hover:text-red-700">
-                            <Trash2 className="size-4" />
-                          </Button>
-                        </div>
+                        <Badge
+                          className={
+                            prop.risk_level === "high"
+                              ? "bg-red-100 text-red-700"
+                              : prop.risk_level === "mid"
+                              ? "bg-amber-100 text-amber-700"
+                              : "bg-emerald-100 text-emerald-700"
+                          }
+                        >
+                          {prop.risk_level.toUpperCase()}
+                        </Badge>
                       </TableCell>
                     </TableRow>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
-        </div>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        )}
       </div>
 
       {/* Pagination */}
-      <div className="flex items-center justify-between text-sm text-slate-600">
+      <div className="flex items-center justify-between text-xs text-slate-600 pt-1">
         <div>
-          Showing {startIndex + 1}-{Math.min(startIndex + itemsPerPage, filteredProperties.length)} of {filteredProperties.length} properties
+          Showing {filtered.length === 0 ? 0 : startIndex + 1}–{Math.min(startIndex + itemsPerPage, filtered.length)} of{" "}
+          {filtered.length} properties
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <Button
             variant="outline"
             size="sm"
-            onClick={() => handlePageChange(currentPage - 1)}
+            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
             disabled={currentPage === 1}
+            className="h-7 text-xs"
           >
             Previous
           </Button>
-          <div className="flex gap-1">
-            {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
-              let pageNum;
-              if (totalPages <= 5) {
-                pageNum = i + 1;
-              } else if (currentPage <= 3) {
-                pageNum = i + 1;
-              } else if (currentPage >= totalPages - 2) {
-                pageNum = totalPages - 4 + i;
-              } else {
-                pageNum = currentPage - 2 + i;
-              }
-              return (
-                <Button
-                  key={pageNum}
-                  variant={currentPage === pageNum ? "default" : "outline"}
-                  size="sm"
-                  className={currentPage === pageNum ? "bg-[#00264D] hover:bg-[#00264D]/90" : ""}
-                  onClick={() => handlePageChange(pageNum)}
-                >
-                  {pageNum}
-                </Button>
-              );
-            })}
-          </div>
+          <span className="px-2 text-slate-700">
+            Page {totalPages === 0 ? 0 : currentPage} of {totalPages}
+          </span>
           <Button
             variant="outline"
             size="sm"
-            onClick={() => handlePageChange(currentPage + 1)}
-            disabled={currentPage === totalPages}
+            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            disabled={currentPage >= totalPages}
+            className="h-7 text-xs"
           >
             Next
           </Button>

@@ -4,16 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import {
-  BUILDINGS,
-  HOTSPOTS,
-  riskLevel,
+  api,
   formatKES,
   CLASS_LABEL,
-  type Building,
+  type ExposureAsset,
   type HousingClass,
   type Hotspot,
-  type ReturnPeriod,
-} from "@/lib/cat-model";
+  type RP,
+} from "@/lib/api";
 import { Layers, Compass, Eye, Sparkles } from "lucide-react";
 
 const MAPBOX_TOKEN =
@@ -23,30 +21,56 @@ const MAPBOX_TOKEN =
   "";
 
 export function RiskMap({
-  rp,
-  filter,
-  showHotspots,
+  rp = "25y",
+  filter = "all",
+  showHotspots = true,
+  assets: propAssets,
+  hotspots: propHotspots,
   selectedBuilding,
   selectedHotspot,
   onSelectBuilding,
   onSelectHotspot,
 }: {
-  rp: ReturnPeriod;
-  filter: HousingClass | "all";
-  showHotspots: boolean;
-  selectedBuilding?: Building | null;
+  rp?: RP | number;
+  filter?: HousingClass | "all";
+  showHotspots?: boolean;
+  assets?: ExposureAsset[];
+  hotspots?: Hotspot[];
+  selectedBuilding?: ExposureAsset | null;
   selectedHotspot?: Hotspot | null;
-  onSelectBuilding: (b: Building) => void;
-  onSelectHotspot: (h: Hotspot) => void;
+  onSelectBuilding?: (b: ExposureAsset) => void;
+  onSelectHotspot?: (h: Hotspot) => void;
 }) {
+  const normRP: RP = typeof rp === "number" ? (`${rp}y` as RP) : rp;
+
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [is3D, setIs3D] = useState(true);
   const [mapStyle, setMapStyle] = useState<"light" | "dark" | "satellite">("light");
 
+  const [assets, setAssets] = useState<ExposureAsset[]>(propAssets || []);
+  const [hotspots, setHotspots] = useState<Hotspot[]>(propHotspots || []);
+
   const cb = useRef({ onSelectBuilding, onSelectHotspot });
   cb.current = { onSelectBuilding, onSelectHotspot };
+
+  // Sync or fetch dynamic assets & hotspots
+  useEffect(() => {
+    if (propAssets && propAssets.length) {
+      setAssets(propAssets);
+    } else {
+      api.exposureAssets(normRP, { limit: 1000 }).then((res) => setAssets(res.assets)).catch(() => {});
+    }
+  }, [propAssets, normRP]);
+
+  useEffect(() => {
+    if (propHotspots && propHotspots.length) {
+      setHotspots(propHotspots);
+    } else {
+      api.hazardHotspots(normRP).then((res) => setHotspots(res)).catch(() => {});
+    }
+  }, [propHotspots, normRP]);
 
   const styleUrls = {
     light: "mapbox://styles/mapbox/light-v11",
@@ -108,9 +132,10 @@ export function RiskMap({
   // 3. Zoom into Selected Building with 3D Camera FlyTo
   useEffect(() => {
     if (!map.current || !mapLoaded || !selectedBuilding) return;
+    const bLng = (selectedBuilding as any).lng ?? selectedBuilding.lon;
 
     map.current.flyTo({
-      center: [selectedBuilding.lng, selectedBuilding.lat],
+      center: [bLng, selectedBuilding.lat],
       zoom: 16.5,
       pitch: is3D ? 62 : 0,
       bearing: is3D ? -15 : 0,
@@ -123,9 +148,10 @@ export function RiskMap({
   // 4. Zoom into Selected Hotspot with 3D Camera FlyTo
   useEffect(() => {
     if (!map.current || !mapLoaded || !selectedHotspot) return;
+    const hLng = (selectedHotspot as any).lng ?? selectedHotspot.lon;
 
     map.current.flyTo({
-      center: [selectedHotspot.lng, selectedHotspot.lat],
+      center: [hLng, selectedHotspot.lat],
       zoom: 15.2,
       pitch: is3D ? 58 : 0,
       bearing: is3D ? -12 : 0,
@@ -226,30 +252,31 @@ export function RiskMap({
       renderLayers(map.current);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rp, filter, showHotspots, selectedBuilding, selectedHotspot, mapLoaded]);
+  }, [normRP, filter, showHotspots, selectedBuilding, selectedHotspot, mapLoaded, assets, hotspots]);
 
   function renderLayers(m: mapboxgl.Map) {
     // --- BUILDINGS GEOJSON ---
-    const filteredBuildings = BUILDINGS.filter(
-      (b) => filter === "all" || b.cls === filter
+    const filteredBuildings = assets.filter(
+      (b) => filter === "all" || b.housing_class === filter
     );
 
     const buildingFeatures: GeoJSON.Feature[] = filteredBuildings.map((b) => {
-      const lvl = riskLevel(b, rp);
-      const isSelected = selectedBuilding?.id === b.id;
+      const lvl = b.risk_level || (b.hazard_score > 0.6 ? "high" : b.hazard_score > 0.3 ? "mid" : "low");
+      const isSelected = selectedBuilding?.loc_id === b.loc_id || (selectedBuilding as any)?.id === b.loc_id;
+      const lng = (b as any).lng ?? b.lon;
       return {
         type: "Feature",
         geometry: {
           type: "Point",
-          coordinates: [b.lng, b.lat],
+          coordinates: [lng, b.lat],
         },
         properties: {
-          id: b.id,
+          id: b.loc_id,
           ward: b.ward,
-          cls: b.cls,
-          area: b.area,
-          tiv: b.tiv,
-          depth100: b.depth100,
+          cls: b.housing_class,
+          area: b.floor_area_m2,
+          tiv: b.tiv_kes,
+          depth100: b.depth_m,
           risk: lvl,
           color: isSelected ? "#00264D" : lvl === "high" ? "#D21245" : lvl === "mid" ? "#D97706" : "#16A34A",
           radius: isSelected ? 8 : lvl === "high" ? 6 : 4.5,
@@ -296,8 +323,8 @@ export function RiskMap({
       m.on("click", "buildings-points", (e) => {
         if (!e.features || !e.features[0]) return;
         const id = e.features[0].properties?.id;
-        const b = BUILDINGS.find((item) => item.id === id);
-        if (b) {
+        const b = assets.find((item) => item.loc_id === id);
+        if (b && cb.current.onSelectBuilding) {
           cb.current.onSelectBuilding(b);
         }
       });
@@ -312,6 +339,7 @@ export function RiskMap({
     }
 
     // --- SELECTED BUILDING HIGHLIGHT RING ---
+    const selLng = selectedBuilding ? ((selectedBuilding as any).lng ?? selectedBuilding.lon) : 0;
     const selectedFeatureData: GeoJSON.FeatureCollection = selectedBuilding
       ? {
           type: "FeatureCollection",
@@ -320,7 +348,7 @@ export function RiskMap({
               type: "Feature",
               geometry: {
                 type: "Point",
-                coordinates: [selectedBuilding.lng, selectedBuilding.lat],
+                coordinates: [selLng, selectedBuilding.lat],
               },
               properties: {},
             },
@@ -357,19 +385,22 @@ export function RiskMap({
     }
 
     // --- HOTSPOTS GEOJSON ---
-    const hotspotFeatures: GeoJSON.Feature[] = HOTSPOTS.map((h) => ({
-      type: "Feature",
-      geometry: {
-        type: "Point",
-        coordinates: [h.lng, h.lat],
-      },
-      properties: {
-        name: h.name,
-        demDetected: h.demDetected,
-        aiDetected: h.aiDetected,
-        color: h.demDetected ? "#16A34A" : "#D21245",
-      },
-    }));
+    const hotspotFeatures: GeoJSON.Feature[] = hotspots.map((h) => {
+      const lng = (h as any).lng ?? h.lon;
+      const isHigh = (h.hazard_score ?? 0) > 0.5 || h.tier_label === "High" || h.tier_label === "Extreme";
+      return {
+        type: "Feature",
+        geometry: {
+          type: "Point",
+          coordinates: [lng, h.lat],
+        },
+        properties: {
+          name: h.name,
+          tier_label: h.tier_label,
+          color: isHigh ? "#D21245" : "#16A34A",
+        },
+      };
+    });
 
     const hotspotSourceData: GeoJSON.FeatureCollection = {
       type: "FeatureCollection",
@@ -413,8 +444,8 @@ export function RiskMap({
       m.on("click", "hotspots-rings", (e) => {
         if (!e.features || !e.features[0]) return;
         const name = e.features[0].properties?.name;
-        const h = HOTSPOTS.find((item) => item.name === name);
-        if (h) {
+        const h = hotspots.find((item) => item.name === name);
+        if (h && cb.current.onSelectHotspot) {
           cb.current.onSelectHotspot(h);
         }
       });

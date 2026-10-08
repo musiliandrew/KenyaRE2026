@@ -230,7 +230,7 @@ class HazardEngine:
         for h in hotspots:
             name = h.get("name", "Unknown")
             lat = float(h.get("lat", 0.0))
-            lon = float(h.get("lon", 0.0))
+            lon = float(h.get("lon", h.get("lng", 0.0)))
             res = self.get_hazard_depth(lat, lon, return_period)
             results.append({
                 "name": name,

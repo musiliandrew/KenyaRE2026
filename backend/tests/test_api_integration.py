@@ -46,6 +46,8 @@ def main():
     check("hazard/lookup returns depth", "depth_m" in h, f"depth={h['depth_m']}")
     hot = get("/hazard/hotspots", return_period="100y")
     check("hazard/hotspots non-empty", len(hot) > 0, f"n={len(hot)}")
+    check("hotspot lon is real (regression: lng/lon key)", all(36.5 < x["lon"] < 37.2 for x in hot))
+    check("some hotspots are wet at 100y", any(x["depth_m"] > 0 for x in hot), f"wet={sum(1 for x in hot if x['depth_m'] > 0)}")
     grid = get("/hazard/grid", return_period="100y", step=16)
     check("hazard/grid has wet cells", grid["count"] > 0, f"cells={grid['count']}")
 

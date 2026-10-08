@@ -4,9 +4,11 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Building2, MapPin, DollarSign, Ruler } from "lucide-react";
+import { Building2, MapPin, DollarSign, Ruler, Loader2 } from "lucide-react";
+import { api, formatKES } from "@/lib/api";
 
-export function PropertyForm() {
+export function PropertyForm({ onCreated }: { onCreated?: () => void }) {
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({
     location: "",
     housingClass: "",
@@ -14,7 +16,7 @@ export function PropertyForm() {
     costPerM2: "",
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!formData.location || !formData.housingClass || !formData.floorArea || !formData.costPerM2) {
@@ -22,17 +24,46 @@ export function PropertyForm() {
       return;
     }
 
-    const tiv = parseFloat(formData.floorArea) * parseFloat(formData.costPerM2);
+    const area = parseFloat(formData.floorArea);
+    const cost = parseFloat(formData.costPerM2);
+    const tiv = area * cost;
 
-    toast.success(`Property added! TIV: KES ${tiv.toLocaleString()}`);
+    setIsSubmitting(true);
+    try {
+      const locId = `PROP-${Math.floor(1000 + Math.random() * 9000)}`;
+      const ward = formData.location.split(",")[0].trim() || "Nairobi Central";
+      const payload = [
+        {
+          loc_id: locId,
+          name: formData.location,
+          ward: ward,
+          housing_class: formData.housingClass,
+          floor_area_m2: area,
+          cost_per_m2_kes: cost,
+          tiv_kes: tiv,
+          // default coordinate near central Nairobi if geocoding not provided
+          lat: -1.286389,
+          lon: 36.817223,
+        },
+      ];
 
-    // Reset form
-    setFormData({
-      location: "",
-      housingClass: "",
-      floorArea: "",
-      costPerM2: "",
-    });
+      const res = await api.portfolioUpload(payload, "manual_form");
+      toast.success(`Property registered: ${formatKES(tiv)} TIV (${res.valid_count} added)`);
+
+      // Reset form
+      setFormData({
+        location: "",
+        housingClass: "",
+        floorArea: "",
+        costPerM2: "",
+      });
+
+      if (onCreated) onCreated();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to add property to portfolio");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -120,8 +151,14 @@ export function PropertyForm() {
         )}
       </div>
 
-      <Button type="submit" className="w-full bg-[#D21245] hover:bg-[#B50F3B]">
-        Add Property to Portfolio
+      <Button type="submit" disabled={isSubmitting} className="w-full bg-[#D21245] hover:bg-[#B50F3B]">
+        {isSubmitting ? (
+          <>
+            <Loader2 className="mr-2 size-4 animate-spin" /> Adding to Portfolio...
+          </>
+        ) : (
+          "Add Property to Portfolio"
+        )}
       </Button>
     </form>
   );

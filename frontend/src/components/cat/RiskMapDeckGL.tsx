@@ -4,41 +4,65 @@ import { useEffect, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
-  BUILDINGS,
-  HOTSPOTS,
-  riskLevel,
-  type Building,
-  type HousingClass,
+  api,
+  type ExposureAsset,
   type Hotspot,
-  type ReturnPeriod,
-} from "@/lib/cat-model";
-import { Layers, Compass, Eye, Sparkles } from "lucide-react";
+  type HousingClass,
+  type RP,
+} from "@/lib/api";
+import { Compass, Eye, Sparkles } from "lucide-react";
 
 export function RiskMapDeckGL({
-  rp,
-  filter,
-  showHotspots,
+  rp = "100y",
+  filter = "all",
+  showHotspots = true,
+  assets: propAssets,
+  hotspots: propHotspots,
   selectedBuilding,
   selectedHotspot,
   onSelectBuilding,
   onSelectHotspot,
 }: {
-  rp: ReturnPeriod;
-  filter: HousingClass | "all";
-  showHotspots: boolean;
-  selectedBuilding?: Building | null;
-  selectedHotspot?: Hotspot | null;
-  onSelectBuilding: (b: Building) => void;
-  onSelectHotspot: (h: Hotspot) => void;
+  rp?: RP | number;
+  filter?: HousingClass | "all";
+  showHotspots?: boolean;
+  assets?: ExposureAsset[];
+  hotspots?: Hotspot[];
+  selectedBuilding?: any | null;
+  selectedHotspot?: any | null;
+  onSelectBuilding?: (b: any) => void;
+  onSelectHotspot?: (h: any) => void;
 }) {
+  const normRP: RP = typeof rp === "number" ? (`${rp}y` as RP) : rp;
+
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [is3D, setIs3D] = useState(true);
   const [mapStyle, setMapStyle] = useState<"light" | "dark" | "satellite">("light");
 
+  const [assets, setAssets] = useState<ExposureAsset[]>(propAssets || []);
+  const [hotspots, setHotspots] = useState<Hotspot[]>(propHotspots || []);
+
   const cb = useRef({ onSelectBuilding, onSelectHotspot });
   cb.current = { onSelectBuilding, onSelectHotspot };
+
+  // Fetch real data if not provided via props
+  useEffect(() => {
+    if (propAssets && propAssets.length) {
+      setAssets(propAssets);
+    } else {
+      api.exposureAssets(normRP, { limit: 1000 }).then((res) => setAssets(res.assets)).catch(() => {});
+    }
+  }, [propAssets, normRP]);
+
+  useEffect(() => {
+    if (propHotspots && propHotspots.length) {
+      setHotspots(propHotspots);
+    } else {
+      api.hazardHotspots(normRP).then((res) => setHotspots(res)).catch(() => {});
+    }
+  }, [propHotspots, normRP]);
 
   const styleUrls = {
     light: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
@@ -63,8 +87,6 @@ export function RiskMapDeckGL({
 
     map.on("load", () => {
       setMapLoaded(true);
-      addBuildingLayers(map);
-      addHotspotLayers(map);
     });
 
     mapRef.current = map;
@@ -91,26 +113,24 @@ export function RiskMapDeckGL({
 
   // Render building layers
   function addBuildingLayers(map: maplibregl.Map) {
-    const filteredBuildings = BUILDINGS.filter(
-      (b) => filter === "all" || b.cls === filter
-    );
+    const filtered = assets.filter((b) => filter === "all" || b.housing_class === filter);
 
-    const buildingFeatures: GeoJSON.Feature[] = filteredBuildings.map((b) => {
-      const lvl = riskLevel(b, rp);
-      const isSelected = selectedBuilding?.id === b.id;
+    const buildingFeatures: GeoJSON.Feature[] = filtered.map((b) => {
+      const isSelected = selectedBuilding?.loc_id === b.loc_id || selectedBuilding?.id === b.loc_id;
+      const lvl = b.risk_level || "low";
       return {
         type: "Feature",
         geometry: {
           type: "Point",
-          coordinates: [b.lng, b.lat],
+          coordinates: [b.lon, b.lat],
         },
         properties: {
-          id: b.id,
+          id: b.loc_id,
           ward: b.ward,
-          cls: b.cls,
-          area: b.area,
-          tiv: b.tiv,
-          depth100: b.depth100,
+          cls: b.housing_class,
+          area: b.floor_area_m2,
+          tiv: b.tiv_kes,
+          depth: b.depth_m,
           risk: lvl,
           color: isSelected ? "#00264D" : lvl === "high" ? "#D21245" : lvl === "mid" ? "#D97706" : "#16A34A",
           radius: isSelected ? 8 : lvl === "high" ? 6 : 4.5,
@@ -155,9 +175,9 @@ export function RiskMapDeckGL({
       map.on("click", "buildings-points", (e) => {
         if (e.features && e.features[0]) {
           const props = e.features[0].properties;
-          const building = BUILDINGS.find((b) => b.id === props?.id);
-          if (building) {
-            cb.current.onSelectBuilding(building);
+          const found = assets.find((b) => b.loc_id === props?.id);
+          if (found && cb.current.onSelectBuilding) {
+            cb.current.onSelectBuilding(found);
           }
         }
       });
@@ -184,21 +204,21 @@ export function RiskMapDeckGL({
       return;
     }
 
-    const hotspotFeatures: GeoJSON.Feature[] = HOTSPOTS.map((h) => {
+    const hotspotFeatures: GeoJSON.Feature[] = hotspots.map((h) => {
       const isSelected = selectedHotspot?.name === h.name;
+      const isHigh = (h.hazard_score || 0) > 0.4 || h.depth_m > 0.5;
       return {
         type: "Feature",
         geometry: {
           type: "Point",
-          coordinates: [h.lng, h.lat],
+          coordinates: [h.lon, h.lat],
         },
         properties: {
           name: h.name,
-          aiDetected: h.aiDetected,
-          demDetected: h.demDetected,
-          notes: h.notes,
-          color: isSelected ? "#00264D" : h.aiDetected ? "#D21245" : "#00264D",
-          radius: isSelected ? 12 : 10,
+          depth_m: h.depth_m,
+          score: h.hazard_score,
+          color: isSelected ? "#00264D" : isHigh ? "#D21245" : "#00264D",
+          radius: isSelected ? 12 : 9,
         },
       };
     });
@@ -240,9 +260,9 @@ export function RiskMapDeckGL({
       map.on("click", "hotspots-points", (e) => {
         if (e.features && e.features[0]) {
           const props = e.features[0].properties;
-          const hotspot = HOTSPOTS.find((h) => h.name === props?.name);
-          if (hotspot) {
-            cb.current.onSelectHotspot(hotspot);
+          const found = hotspots.find((h) => h.name === props?.name);
+          if (found && cb.current.onSelectHotspot) {
+            cb.current.onSelectHotspot(found);
           }
         }
       });
@@ -257,46 +277,51 @@ export function RiskMapDeckGL({
     }
   }
 
-  // Update layers when props change
+  // Update layers when assets, hotspots or props change
   useEffect(() => {
     if (mapRef.current && mapLoaded) {
       addBuildingLayers(mapRef.current);
       addHotspotLayers(mapRef.current);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rp, filter, showHotspots, selectedBuilding, selectedHotspot, mapLoaded]);
+  }, [assets, hotspots, normRP, filter, showHotspots, selectedBuilding, selectedHotspot, mapLoaded]);
 
   // Zoom to selected building
   useEffect(() => {
     if (!mapRef.current || !mapLoaded || !selectedBuilding) return;
-
-    mapRef.current.flyTo({
-      center: [selectedBuilding.lng, selectedBuilding.lat],
-      zoom: 16.5,
-      pitch: is3D ? 62 : 0,
-      bearing: is3D ? -15 : 0,
-      offset: [-90, 0],
-      duration: 1500,
-      essential: true,
-    });
+    const lon = selectedBuilding.lon ?? selectedBuilding.lng;
+    const lat = selectedBuilding.lat;
+    if (lon && lat) {
+      mapRef.current.flyTo({
+        center: [lon, lat],
+        zoom: 16.5,
+        pitch: is3D ? 62 : 0,
+        bearing: is3D ? -15 : 0,
+        offset: [-90, 0],
+        duration: 1500,
+        essential: true,
+      });
+    }
   }, [selectedBuilding, mapLoaded, is3D]);
 
   // Zoom to selected hotspot
   useEffect(() => {
     if (!mapRef.current || !mapLoaded || !selectedHotspot) return;
-
-    mapRef.current.flyTo({
-      center: [selectedHotspot.lng, selectedHotspot.lat],
-      zoom: 15.2,
-      pitch: is3D ? 58 : 0,
-      bearing: is3D ? -12 : 0,
-      offset: [-90, 0],
-      duration: 1500,
-      essential: true,
-    });
+    const lon = selectedHotspot.lon ?? selectedHotspot.lng;
+    const lat = selectedHotspot.lat;
+    if (lon && lat) {
+      mapRef.current.flyTo({
+        center: [lon, lat],
+        zoom: 15.2,
+        pitch: is3D ? 58 : 0,
+        bearing: is3D ? -12 : 0,
+        offset: [-90, 0],
+        duration: 1500,
+        essential: true,
+      });
+    }
   }, [selectedHotspot, mapLoaded, is3D]);
 
-  // Handle 3D toggle
   const toggle3DTilt = () => {
     if (!mapRef.current) return;
     const next3D = !is3D;
@@ -308,7 +333,6 @@ export function RiskMapDeckGL({
     });
   };
 
-  // Reset view
   const resetView = () => {
     if (!mapRef.current) return;
     mapRef.current.flyTo({
@@ -378,7 +402,7 @@ export function RiskMapDeckGL({
       <div className="absolute bottom-4 left-4 bg-white/90 backdrop-blur px-3 py-1.5 rounded-lg shadow-md">
         <div className="flex items-center gap-2 text-xs font-medium text-slate-700">
           <Sparkles className="size-3 text-[#D21245]" />
-          MapLibre GL
+          MapLibre GL · {assets.length} Assets · {hotspots.length} Hotspots
         </div>
       </div>
     </div>
