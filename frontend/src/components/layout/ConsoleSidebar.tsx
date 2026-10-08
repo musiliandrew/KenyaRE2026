@@ -249,7 +249,7 @@ export function ConsoleSidebar() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 min-w-0">
               <div className="size-8 rounded-full bg-[#00264D] text-white flex items-center justify-center font-bold text-xs shrink-0">
-                {user?.username ? user.username.charAt(0).toUpperCase() : "U"}
+                {(user?.name || user?.email || "U").charAt(0).toUpperCase()}
               </div>
               <div className="min-w-0">
                 <div className="truncate text-xs font-bold text-slate-900">

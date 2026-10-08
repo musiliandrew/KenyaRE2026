@@ -37,7 +37,7 @@ import {
   Globe,
   FileSpreadsheet,
   UploadCloud,
-  
+  ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AnimatedNumber } from "@/components/cat/AnimatedNumber";
@@ -258,7 +258,7 @@ export default function DashboardPage() {
   const activeCustomRun = runs.find((r) => r.id === activeRunId) || null;
 
   // Reactively scaled assets for custom run when scenario (5y, 10y, 25y, 50y, 100y) changes
-  const scaledCustomAssets = useMemo(() => {
+  const scaledCustomAssets = useMemo<ExposureAsset[]>(() => {
     if (!activeCustomRun) return [];
     const scale = getHydrologicalScale(scenario);
     return activeCustomRun.assets.map((a) => {
@@ -270,13 +270,13 @@ export default function DashboardPage() {
         depth_m: depth,
         loss_kes: loss,
         damage_ratio: damageRatio,
-        risk_level: damageRatio > 0.35 ? "high" : damageRatio > 0.08 ? "mid" : "low",
+        risk_level: (damageRatio > 0.35 ? "high" : damageRatio > 0.08 ? "mid" : "low") as "low" | "mid" | "high",
         tier_label: depth > 1.0 ? "Extreme Floodway" : depth > 0.4 ? "High Hazard" : "Moderate Pluvial",
       };
     });
   }, [activeCustomRun, scenario]);
 
-  const consolidatedAssets = useMemo(() => {
+  const consolidatedAssets = useMemo<ExposureAsset[]>(() => {
     if (!runs || runs.length === 0) return assetsData?.assets || [];
     const scale = getHydrologicalScale(scenario);
     return runs.flatMap((r) =>
@@ -289,7 +289,7 @@ export default function DashboardPage() {
           depth_m: depth,
           loss_kes: loss,
           damage_ratio: damageRatio,
-          risk_level: damageRatio > 0.35 ? "high" : damageRatio > 0.08 ? "mid" : "low",
+          risk_level: (damageRatio > 0.35 ? "high" : damageRatio > 0.08 ? "mid" : "low") as "low" | "mid" | "high",
           tier_label: depth > 1.0 ? "Extreme Floodway" : depth > 0.4 ? "High Hazard" : "Moderate Pluvial",
           source_file: a.source_file || r.fileName || r.name,
           dataset_name: r.name,
@@ -774,67 +774,7 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {!isConsolidated && activeCustomRun && (
-            <div className="mb-4 rounded-xl border border-emerald-300 bg-gradient-to-r from-emerald-50 via-teal-50 to-white p-3 sm:p-4 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white font-bold text-xs">
-                  ✓
-                </span>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs sm:text-sm font-bold text-emerald-950 truncate">
-                      Active File: {activeCustomRun.fileName || activeCustomRun.name}
-                    </span>
-                    <span className="rounded-full bg-emerald-200/80 px-2 py-0.5 text-[10px] font-bold text-emerald-900">
-                      {activeCustomRun.assetCount} Assets
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-emerald-800 mt-0.5">
-                    Portfolio TIV: <strong className="font-mono">{formatKES(activeCustomRun.totalTivKes)}</strong> · Uploaded: {activeCustomRun.timestamp}
-                  </div>
-                </div>
-              </div>
 
-              <div className="flex items-center gap-2 self-start md:self-auto shrink-0 flex-wrap">
-                {runs.length > 1 && (
-                  <Button
-                    size="sm"
-                    onClick={() => handleSelectRun("all")}
-                    className="h-7 text-[11px] font-semibold bg-[#00264D] hover:bg-[#001830] text-white cursor-pointer"
-                  >
-                    🌐 View Consolidated (All Files)
-                  </Button>
-                )}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleSelectRun("baseline")}
-                  className="h-7 text-[11px] font-semibold text-slate-700 bg-white hover:bg-slate-50 border-slate-300 cursor-pointer"
-                >
-                  <RotateCcw className="size-3 mr-1" />
-                  Return to Baseline
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={(e) => handleDeleteRun(activeCustomRun.id, e)}
-                  className="h-7 text-[11px] font-semibold text-red-700 hover:text-red-800 bg-white hover:bg-red-50 border-red-200 cursor-pointer"
-                  title="Remove this uploaded record"
-                >
-                  <Trash2 className="size-3 mr-1" />
-                  Delete File
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={() => setIsIngestModalOpen(true)}
-                  className="h-7 text-[11px] font-semibold bg-[#D21245] hover:bg-[#B50F3B] text-white cursor-pointer"
-                >
-                  <PlusCircle className="size-3 mr-1" />
-                  + Upload Another
-                </Button>
-              </div>
-            </div>
-          )}
 
           {activePanel === "overview" && (
             <OverviewPanel
@@ -1756,9 +1696,21 @@ function AIPanel({
 function AssumptionsPanel() {
   return (
     <div className="space-y-4 sm:space-y-6">
-      <div>
-        <h1 className="text-xl sm:text-2xl font-bold text-[#00264D]">Data & Model Assumptions</h1>
-        <p className="text-xs sm:text-sm text-slate-600">Actuarial methodology, hazard rasters, and vulnerability parameters</p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-bold text-[#00264D]">Data & Model Assumptions</h1>
+          <p className="text-xs sm:text-sm text-slate-600">Actuarial methodology, hazard rasters, and vulnerability parameters</p>
+        </div>
+        <a
+          href="/CAT_MODEL_ARCHITECTURE.pdf"
+          target="_blank"
+          rel="noopener noreferrer"
+          download="KenyaRe_CAT_Model_Architecture_Blueprint.pdf"
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#00264D] hover:bg-[#001830] text-white text-xs font-semibold transition shadow-xs self-start sm:self-auto cursor-pointer"
+        >
+          <Download className="size-3.5" />
+          <span>Download Architecture Blueprint (PDF)</span>
+        </a>
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white p-3.5 sm:p-6 shadow-xs">
@@ -1838,7 +1790,7 @@ function ReportsPanel({
   activeRunId?: string;
   onSelectRun?: (id: string) => void;
 }) {
-  const [reportTab, setReportTab] = useState<"memorandum" | "quote" | "portfolio">("memorandum");
+  const [reportTab, setReportTab] = useState<"memorandum" | "quote" | "portfolio" | "blueprint">("memorandum");
   const [isExportingPortfolio, setIsExportingPortfolio] = useState(false);
   const [reportScope, setReportScope] = useState<string>(activeRunId || "all");
 
@@ -1983,6 +1935,16 @@ function ReportsPanel({
         >
           3. Portfolio Schedule PDF
         </button>
+        <button
+          onClick={() => setReportTab("blueprint")}
+          className={`pb-2.5 px-3 text-xs sm:text-sm font-semibold transition-colors cursor-pointer border-b-2 whitespace-nowrap ${
+            reportTab === "blueprint"
+              ? "border-[#D21245] text-[#D21245]"
+              : "border-transparent text-slate-500 hover:text-slate-800"
+          }`}
+        >
+          4. Architecture Blueprint PDF
+        </button>
       </div>
 
       {/* Tab 1: Executive Memorandum */}
@@ -2071,8 +2033,8 @@ function ReportsPanel({
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {(scopedAssets || []).slice(0, 30).map((a, idx) => (
-                  <tr key={a.loc_id || a.id || idx} className="hover:bg-slate-50">
-                    <td className="p-2.5 font-mono text-slate-800">{a.loc_id || a.id || `Asset-${idx + 1}`}</td>
+                  <tr key={a.loc_id || (a as any).id || idx} className="hover:bg-slate-50">
+                    <td className="p-2.5 font-mono text-slate-800">{a.loc_id || (a as any).id || `Asset-${idx + 1}`}</td>
                     <td className="p-2.5 capitalize">{a.housing_class.replace(/_/g, " ")}</td>
                     <td className="p-2.5 text-right font-medium text-slate-900">{formatKES(a.tiv_kes)}</td>
                     <td className="p-2.5 font-mono text-slate-600">{a.lat.toFixed(4)}</td>
@@ -2087,6 +2049,92 @@ function ReportsPanel({
               Showing first 30 of {scopedAssets.length} assets. Full schedule available in PDF export.
             </p>
           )}
+        </div>
+      )}
+
+      {/* Tab 4: Architecture Blueprint PDF */}
+      {reportTab === "blueprint" && (
+        <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-6 shadow-xs space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <h3 className="text-base font-bold text-[#00264D] flex items-center gap-2">
+                <span>Kenya Re CAT Modeling Engineering Blueprint</span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-200">
+                  Official 6-Page Specification
+                </span>
+              </h3>
+              <p className="text-xs text-slate-600 mt-0.5">
+                Full technical specification: 4 CAT Pillars (Hazard, JRC Sigmoids, OED Exposure, Financial AAL/EP), AI Layer, and Test Case verification.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 self-start sm:self-auto shrink-0 flex-wrap">
+              <a
+                href="/CAT_MODEL_ARCHITECTURE.pdf"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-semibold shadow-2xs"
+              >
+                <ExternalLink className="size-3.5 text-[#00264D]" />
+                <span>Open in New Tab</span>
+              </a>
+              <a
+                href="/CAT_MODEL_ARCHITECTURE.pdf"
+                download="KenyaRe_CAT_Model_Architecture_Blueprint.pdf"
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#00264D] hover:bg-[#001830] text-white text-xs font-semibold shadow-xs"
+              >
+                <Download className="size-3.5 text-[#D21245]" />
+                <span>Download PDF Document</span>
+              </a>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 py-2 text-xs">
+            <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+              <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
+                Analytical Framework
+              </span>
+              <div className="font-bold text-slate-800 text-sm mt-0.5">
+                4-Pillar Oasis OED & JRC
+              </div>
+              <span className="text-[11px] text-slate-500 block mt-0.5">
+                Grounded on Huizinga et al. (2017) & CLIMADA
+              </span>
+            </div>
+
+            <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+              <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
+                Geospatial Resolution
+              </span>
+              <div className="font-bold text-slate-800 text-sm mt-0.5">
+                NASA DEM Nairobi Catchment
+              </div>
+              <span className="text-[11px] text-slate-500 block mt-0.5">
+                5 Return Periods (5y to 100y) & 24 Validation Hotspots
+              </span>
+            </div>
+
+            <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+              <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
+                AI Intelligence Layer
+              </span>
+              <div className="font-bold text-slate-800 text-sm mt-0.5">
+                Groq Llama-3 NLP + Drainage ML
+              </div>
+              <span className="text-[11px] text-slate-500 block mt-0.5">
+                Unstructured document ingestion + solvency buffer
+              </span>
+            </div>
+          </div>
+
+          {/* Embedded PDF Viewer */}
+          <div className="rounded-xl border border-slate-200 overflow-hidden bg-slate-100">
+            <iframe
+              src="/CAT_MODEL_ARCHITECTURE.pdf#toolbar=1"
+              title="Kenya Re CAT Model Architecture Blueprint"
+              className="w-full h-[620px] border-0"
+            />
+          </div>
         </div>
       )}
     </div>

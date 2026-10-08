@@ -42,10 +42,10 @@ export default function ReportsPage() {
       setIsExportingPortfolioPdf(true);
       await exportExposurePortfolioPDF(
         {
-          totalAssets: assetsData?.total_assets ?? 600,
-          totalTIV: summaryData?.total_tiv_kes ?? 63640000000,
-          aalKES: summaryData?.annual_average_loss_kes ?? 94200000,
-          pml100yKES: summaryData?.loss_100y_kes ?? 842600000,
+          totalAssets: assetsData?.total ?? 600,
+          totalTIV: summaryData?.tiv_kes ?? 63640000000,
+          aalKES: summaryData?.aal_kes ?? 94200000,
+          pml100yKES: summaryData?.pml_100y_kes ?? 842600000,
         },
         assetsData?.assets ?? []
       );

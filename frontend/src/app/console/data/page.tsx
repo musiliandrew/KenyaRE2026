@@ -48,10 +48,10 @@ export default function DataPage() {
     return null;
   }
 
-  const totalAssets = assetsData?.total_assets ?? 600;
-  const totalTIV = summaryData?.total_tiv_kes ?? 63640000000;
-  const aalKES = summaryData?.annual_average_loss_kes ?? 94200000;
-  const pml100yKES = summaryData?.loss_100y_kes ?? 842600000;
+  const totalAssets = assetsData?.total ?? 600;
+  const totalTIV = summaryData?.tiv_kes ?? 63640000000;
+  const aalKES = summaryData?.aal_kes ?? 94200000;
+  const pml100yKES = summaryData?.pml_100y_kes ?? 842600000;
 
   const handleExportPDF = async () => {
     try {
@@ -389,7 +389,7 @@ export default function DataPage() {
                 Add an individual structure directly into Kenya Re's exposure database.
               </p>
             </div>
-            <PropertyForm onSuccess={() => {
+            <PropertyForm onCreated={() => {
               refetchAssets();
               setIngestionMode("baseline");
               toast.success("Property added and added to exposure database!");

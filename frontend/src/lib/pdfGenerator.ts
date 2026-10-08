@@ -1,108 +1,19 @@
 import { jsPDF } from "jspdf";
 import { formatKES, type QuoteResponse, type HousingClass, CLASS_LABEL } from "./api";
+import { drawKenyaReLetterhead, drawKenyaReFooter } from "./branding";
 
 /**
- * Loads the Kenya Re logo as a data URL for embedding into jsPDF documents.
- */
-async function getKenyaReLogoDataUrl(): Promise<string | null> {
-  if (typeof window === "undefined") return null;
-  try {
-    let res = await fetch("/kenya-re-logo.png");
-    if (!res.ok) {
-      res = await fetch("/image.png");
-    }
-    if (!res.ok) return null;
-    const blob = await res.blob();
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(blob);
-    });
-  } catch (err) {
-    console.warn("Could not load Kenya Re logo for PDF:", err);
-    return null;
-  }
-}
-
-/**
- * Draws the standard Kenya Re letterhead banner.
+ * Draws the standard Kenya Re letterhead banner with official corporate logo.
  */
 async function drawHeader(doc: jsPDF, title: string, subtitle?: string): Promise<number> {
-  const logoData = await getKenyaReLogoDataUrl();
-  let startY = 15;
-
-  if (logoData) {
-    try {
-      // Kenya Re Logo aspect ratio ~ 2.4:1
-      doc.addImage(logoData, "PNG", 14, 12, 38, 16);
-    } catch {
-      // Fallback text branding if image decoding fails
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(16);
-      doc.setTextColor(0, 38, 77); // #00264D
-      doc.text("KENYA RE", 14, 22);
-    }
-  } else {
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(16);
-    doc.setTextColor(0, 38, 77);
-    doc.text("KENYA RE", 14, 22);
-  }
-
-  // Right-aligned Corporate Information
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.setTextColor(0, 38, 77);
-  doc.text("KENYA REINSURANCE CORPORATION", 196, 17, { align: "right" });
-
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
-  doc.setTextColor(100, 116, 139);
-  doc.text("Catastrophe Risk Intelligence Platform · Reinsurance House, Taifa Rd, Nairobi", 196, 22, { align: "right" });
-  doc.text(`Generated: ${new Date().toLocaleString("en-KE", { dateStyle: "medium", timeStyle: "short" })}`, 196, 26, { align: "right" });
-
-  // Divider line (Crimson accent)
-  doc.setDrawColor(210, 18, 69); // #D21245
-  doc.setLineWidth(0.8);
-  doc.line(14, 32, 196, 32);
-
-  // Document Title Banner
-  doc.setFillColor(248, 250, 252); // slate-50
-  doc.rect(14, 35, 182, 16, "F");
-  doc.setDrawColor(226, 232, 240);
-  doc.setLineWidth(0.3);
-  doc.rect(14, 35, 182, 16, "S");
-
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(12);
-  doc.setTextColor(0, 38, 77);
-  doc.text(title.toUpperCase(), 18, 43);
-
-  if (subtitle) {
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(8.5);
-    doc.setTextColor(100, 116, 139);
-    doc.text(subtitle, 18, 48);
-  }
-
-  return 57; // Returns next Y cursor
+  return drawKenyaReLetterhead(doc, { title, subtitle });
 }
 
 /**
- * Draws standard document footer
+ * Draws standard document footer with Kenya Re security and ISO certification stamps.
  */
 function drawFooter(doc: jsPDF, pageNumber: number = 1, totalPages: number = 1) {
-  const pageHeight = 297;
-  doc.setDrawColor(226, 232, 240);
-  doc.setLineWidth(0.3);
-  doc.line(14, pageHeight - 16, 196, pageHeight - 16);
-
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(7.5);
-  doc.setTextColor(148, 163, 184);
-  doc.text("CONFIDENTIAL & PROPRIETARY — For official actuarial and underwriting use only.", 14, pageHeight - 11);
-  doc.text(`Kenya Re Catastrophe Risk Model · Page ${pageNumber} of ${totalPages}`, 196, pageHeight - 11, { align: "right" });
+  drawKenyaReFooter(doc, pageNumber, totalPages);
 }
 
 /**

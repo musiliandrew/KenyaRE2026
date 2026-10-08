@@ -242,10 +242,8 @@ export function IngestTestDataModal({
     toast.success("Sample test exposure CSV downloaded!");
   };
 
-  // Ingest unstructured files (.docx, .pdf, .txt, .csv, .json)
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // Core reusable processor for unstructured files (.docx, .pdf, .txt, .csv, .json)
+  const processFile = async (file: File) => {
     setUploadedFile(file);
     setIsExtracting(true);
 
@@ -353,14 +351,14 @@ export function IngestTestDataModal({
           const singleTiv = parsed.estimated_tiv_kes / count;
           const items =
             parsed.parsed_assets && parsed.parsed_assets.length > 0
-              ? parsed.parsed_assets.map((a, i) => ({
+              ? (parsed.parsed_assets as any[]).map((a, i) => ({
                   id: a.loc_id || `UPL-${i + 1}`,
                   name: a.name || `Extracted Asset #${i + 1}`,
-                  lat: a.lat,
-                  lng: a.lon,
-                  housing_class: a.housing_class,
-                  area_sqm: a.floor_area_m2 || 1000,
-                  tiv_kes: a.tiv_kes,
+                  lat: Number(a.lat) || -1.2995,
+                  lng: Number(a.lon ?? a.lng) || 36.8152,
+                  housing_class: (a.housing_class as HousingClass) || "concrete_rcc",
+                  area_sqm: Number(a.floor_area_m2) || 1000,
+                  tiv_kes: Number(a.tiv_kes) || singleTiv,
                   ward: a.ward || parsed.location || "Nairobi",
                 }))
               : Array.from({ length: count }).map((_, idx) => ({
@@ -396,6 +394,13 @@ export function IngestTestDataModal({
     } finally {
       setIsExtracting(false);
     }
+  };
+
+  // Ingest unstructured files (.docx, .pdf, .txt, .csv, .json)
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await processFile(file);
   };
 
   // Quick load of real-world sample scenarios
@@ -470,14 +475,14 @@ export function IngestTestDataModal({
             ward: parsed.location || "Nairobi",
           }));
         } else {
-          rawAssetsToRun = parsed.parsed_assets.map((a, i) => ({
+          rawAssetsToRun = (parsed.parsed_assets as any[]).map((a, i) => ({
             id: a.loc_id || `SLIP-${i + 1}`,
             name: a.name || `Extracted Asset #${i + 1}`,
-            lat: a.lat,
-            lng: a.lon,
-            housing_class: a.housing_class,
-            area_sqm: a.floor_area_m2 || 1000,
-            tiv_kes: a.tiv_kes,
+            lat: Number(a.lat) || -1.2995,
+            lng: Number(a.lon ?? a.lng) || 36.8152,
+            housing_class: (a.housing_class as HousingClass) || "concrete_rcc",
+            area_sqm: Number(a.floor_area_m2) || 1000,
+            tiv_kes: Number(a.tiv_kes) || 50_000_000,
             ward: a.ward || "Nairobi",
           }));
         }
@@ -506,10 +511,10 @@ export function IngestTestDataModal({
       // Enrich frontend ExposureAssets with depth and damage ratios
       const totalTiv = rawAssetsToRun.reduce((acc, curr) => acc + curr.tiv_kes, 0);
       const simulatedAssets: ExposureAsset[] = rawAssetsToRun.map((a, idx) => {
-        const top = modelRun.top_losses?.find((t) => t.loc_id === a.id);
-        const depth = top ? top.depth_m : 0.2 + (idx % 5) * 0.32;
-        const damageRatio = Math.min(0.85, depth > 0 ? (depth / (depth + 1.2)) * 0.75 : 0.02);
-        const lossKes = a.tiv_kes * damageRatio;
+        const top = modelRun.top_losses?.find((t: any) => (t as any).loc_id === a.id);
+        const depth: number = typeof (top as any)?.depth_m === "number" ? Number((top as any).depth_m) : 0.2 + (idx % 5) * 0.32;
+        const damageRatio: number = Math.min(0.85, depth > 0 ? (depth / (depth + 1.2)) * 0.75 : 0.02);
+        const lossKes: number = a.tiv_kes * damageRatio;
 
         return {
           loc_id: a.id,
@@ -528,7 +533,7 @@ export function IngestTestDataModal({
           tier_label: depth > 1.0 ? "Extreme Floodway" : depth > 0.4 ? "High Hazard" : "Moderate Pluvial",
           damage_ratio: damageRatio,
           loss_kes: lossKes,
-          risk_level: damageRatio > 0.35 ? "high" : damageRatio > 0.08 ? "mid" : "low",
+          risk_level: (damageRatio > 0.35 ? "high" : damageRatio > 0.08 ? "mid" : "low") as "low" | "mid" | "high",
           dataset_id: runId,
           dataset_name: finalRunName,
           source_file: fileLabel,

@@ -152,6 +152,7 @@ export interface FacultativeResponse {
   recommended_technical_rate_pct: number; recommended_annual_premium_kes: number;
   depth_100y_m: number; insured_loss_100y_kes: number;
 }
+export type QuoteResponse = FacultativeResponse;
 
 export interface ParseSlipResponse {
   extracted_structures: number; housing_class: string; location: string; total_area_sqm: number;

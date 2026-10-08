@@ -51,8 +51,9 @@ import {
   type RP,
   type AssetDossierResponse,
 } from "@/lib/api";
-import { toast } from "sonner";
 import jsPDF from "jspdf";
+import { toast } from "sonner";
+import { drawKenyaReLetterhead, drawKenyaReFooter } from "@/lib/branding";
 
 interface AssetDetailModalProps {
   isOpen: boolean;
@@ -128,17 +129,6 @@ export function AssetDetailModal({
     };
   }, [asset, activeScenario, isOpen, portfolioAssets]);
 
-  if (!asset) return null;
-
-  const housingClass = (asset.housing_class as HousingClass) || "concrete_rcc";
-  const classLabel = CLASS_LABEL[housingClass] || housingClass;
-  const activeDepth = dossier?.asset.depth_m ?? asset.depth_m ?? 0;
-  const activeLoss = dossier?.asset.loss_kes ?? asset.loss_kes ?? 0;
-  const damageRatioPct =
-    dossier?.asset.damage_ratio_pct ?? (asset.damage_ratio ? asset.damage_ratio * 100 : 0);
-  const tivKes = dossier?.asset.tiv_kes ?? asset.tiv_kes ?? 0;
-  const riskLevel = dossier?.asset.risk_level ?? asset.risk_level ?? "low";
-
   // Vulnerability curve data for recharts
   const vulnPoints = useMemo(() => {
     if (!dossier?.vulnerability_curve?.points) return [];
@@ -161,139 +151,143 @@ export function AssetDetailModal({
     }));
   }, [dossier]);
 
-  // Generate single-asset PDF Report
+  if (!asset) return null;
+
+  const housingClass = (asset.housing_class as HousingClass) || "concrete_rcc";
+  const classLabel = CLASS_LABEL[housingClass] || housingClass;
+  const activeDepth = dossier?.asset.depth_m ?? asset.depth_m ?? 0;
+  const activeLoss = dossier?.asset.loss_kes ?? asset.loss_kes ?? 0;
+  const damageRatioPct =
+    dossier?.asset.damage_ratio_pct ?? (asset.damage_ratio ? asset.damage_ratio * 100 : 0);
+  const tivKes = dossier?.asset.tiv_kes ?? asset.tiv_kes ?? 0;
+  const riskLevel = dossier?.asset.risk_level ?? asset.risk_level ?? "low";
+
+  // Generate single-asset PDF Report with Official Kenya Re Branding
   const handleExportPDF = () => {
     try {
       const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
       const pageWidth = doc.internal.pageSize.getWidth();
 
-      // Header Banner
-      doc.setFillColor(0, 38, 77); // Kenya Re Deep Navy #00264D
-      doc.rect(0, 0, pageWidth, 28, "F");
-
-      doc.setTextColor(255, 255, 255);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(14);
-      doc.text("KENYA REINSURANCE CORPORATION", 14, 12);
-
-      doc.setFontSize(9);
-      doc.setFont("helvetica", "normal");
-      doc.text("SINGLE PROPERTY CATASTROPHE RISK DOSSIER · NAIROBI FLOOD MODEL", 14, 18);
-      doc.text(`Generated: ${new Date().toLocaleDateString("en-KE")}`, pageWidth - 14, 18, { align: "right" });
+      // Official Kenya Re Corporate Letterhead Banner with Embedded Logo
+      const startY = drawKenyaReLetterhead(doc, {
+        title: "Single Property Catastrophe Risk Dossier",
+        subtitle: `Asset ID: ${asset.loc_id} · Return Period: ${activeScenario} · Nairobi Flood Oasis Model`,
+        referenceCode: `KRE-DOSSIER-${asset.loc_id}`,
+        classification: "Confidential",
+      });
 
       // Asset Identity Card
       doc.setFillColor(248, 250, 252);
       doc.setDrawColor(226, 232, 240);
-      doc.roundedRect(14, 34, pageWidth - 28, 40, 2, 2, "FD");
+      doc.roundedRect(14, startY + 1, pageWidth - 28, 38, 2, 2, "FD");
 
       doc.setTextColor(0, 38, 77);
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(13);
-      doc.text(asset.name || asset.loc_id, 18, 43);
+      doc.setFontSize(12);
+      doc.text(asset.name || asset.loc_id, 18, startY + 9);
 
-      doc.setFontSize(9);
+      doc.setFontSize(8.5);
       doc.setFont("helvetica", "normal");
       doc.setTextColor(71, 85, 105);
-      doc.text(`Asset ID: ${asset.loc_id}`, 18, 50);
-      doc.text(`Administrative Ward: ${asset.ward}`, 18, 56);
-      doc.text(`Coordinates: ${asset.lat.toFixed(5)}, ${(asset.lon ?? (asset as any).lng)?.toFixed(5)}`, 18, 62);
-      doc.text(`Typology: ${classLabel}`, 18, 68);
+      doc.text(`Asset ID: ${asset.loc_id}`, 18, startY + 16);
+      doc.text(`Administrative Ward: ${asset.ward}`, 18, startY + 22);
+      doc.text(`Coordinates: ${asset.lat.toFixed(5)}, ${(asset.lon ?? (asset as any).lng)?.toFixed(5)}`, 18, startY + 28);
+      doc.text(`Typology: ${classLabel}`, 18, startY + 34);
 
       doc.setFont("helvetica", "bold");
       doc.setTextColor(0, 38, 77);
-      doc.text(`TIV: ${formatKES(tivKes)}`, pageWidth - 20, 50, { align: "right" });
+      doc.text(`TIV: ${formatKES(tivKes)}`, pageWidth - 18, startY + 16, { align: "right" });
       doc.setTextColor(210, 18, 69);
-      doc.text(`Modeled Loss (${activeScenario}): ${formatKES(activeLoss)}`, pageWidth - 20, 56, { align: "right" });
+      doc.text(`Modeled Loss (${activeScenario}): ${formatKES(activeLoss)}`, pageWidth - 18, startY + 22, { align: "right" });
       doc.setTextColor(15, 23, 42);
-      doc.text(`Water Depth: ${activeDepth.toFixed(2)} m (${damageRatioPct.toFixed(1)}% Damage)`, pageWidth - 20, 62, { align: "right" });
-      doc.text(`Risk Tier: ${riskLevel.toUpperCase()}`, pageWidth - 20, 68, { align: "right" });
+      doc.text(`Water Depth: ${activeDepth.toFixed(2)} m (${damageRatioPct.toFixed(1)}% Damage)`, pageWidth - 18, startY + 28, { align: "right" });
+      doc.text(`Risk Tier: ${riskLevel.toUpperCase()}`, pageWidth - 18, startY + 34, { align: "right" });
 
       // Actuarial EP Table
+      let yPos = startY + 46;
       doc.setTextColor(0, 38, 77);
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-      doc.text("1. Loss & Exceedance Probability Schedule", 14, 84);
+      doc.setFontSize(10.5);
+      doc.text("1. Loss & Exceedance Probability Schedule", 14, yPos);
 
-      let yPos = 90;
+      yPos += 4;
       doc.setFillColor(241, 245, 249);
-      doc.rect(14, yPos, pageWidth - 28, 7, "F");
+      doc.rect(14, yPos, pageWidth - 28, 6.5, "F");
       doc.setFontSize(8);
       doc.setFont("helvetica", "bold");
       doc.setTextColor(51, 65, 85);
-      doc.text("Return Period", 16, yPos + 5);
-      doc.text("AEP (Prob)", 46, yPos + 5);
-      doc.text("Inundation Depth", 76, yPos + 5);
-      doc.text("Damage Ratio", 112, yPos + 5);
-      doc.text("Gross Loss (KES)", 148, yPos + 5);
-      doc.text("Net Insured Loss", pageWidth - 16, yPos + 5, { align: "right" });
+      doc.text("Return Period", 16, yPos + 4.5);
+      doc.text("AEP (Prob)", 46, yPos + 4.5);
+      doc.text("Inundation Depth", 76, yPos + 4.5);
+      doc.text("Damage Ratio", 112, yPos + 4.5);
+      doc.text("Gross Loss (KES)", 148, yPos + 4.5);
+      doc.text("Net Insured Loss", pageWidth - 16, yPos + 4.5, { align: "right" });
 
-      yPos += 8;
+      yPos += 7.5;
       doc.setFont("helvetica", "normal");
       const epRows = dossier?.exceedance_probability_curve || [];
       epRows.forEach((row, i) => {
         if (i % 2 === 1) {
           doc.setFillColor(248, 250, 252);
-          doc.rect(14, yPos - 1, pageWidth - 28, 6.5, "F");
+          doc.rect(14, yPos - 1.5, pageWidth - 28, 6, "F");
         }
         doc.setTextColor(15, 23, 42);
-        doc.text(`${row.years}-Year (${row.return_period})`, 16, yPos + 4);
-        doc.text(`${(row.annual_exceedance_prob * 100).toFixed(1)}%`, 46, yPos + 4);
-        doc.text(`${row.depth_m.toFixed(2)} m`, 76, yPos + 4);
-        doc.text(`${row.damage_ratio_pct.toFixed(1)}%`, 112, yPos + 4);
-        doc.text(formatKES(row.loss_kes), 148, yPos + 4);
-        doc.text(formatKES(row.insured_loss_kes), pageWidth - 16, yPos + 4, { align: "right" });
-        yPos += 6.5;
+        doc.text(`${row.years}-Year (${row.return_period})`, 16, yPos + 3);
+        doc.text(`${(row.annual_exceedance_prob * 100).toFixed(1)}%`, 46, yPos + 3);
+        doc.text(`${row.depth_m.toFixed(2)} m`, 76, yPos + 3);
+        doc.text(`${row.damage_ratio_pct.toFixed(1)}%`, 112, yPos + 3);
+        doc.text(formatKES(row.loss_kes), 148, yPos + 3);
+        doc.text(formatKES(row.insured_loss_kes), pageWidth - 16, yPos + 3, { align: "right" });
+        yPos += 5.8;
       });
 
       // Vulnerability Parameters
-      yPos += 8;
+      yPos += 6;
       doc.setTextColor(0, 38, 77);
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
+      doc.setFontSize(10.5);
       doc.text("2. Calibrated JRC Vulnerability Parameters", 14, yPos);
 
-      yPos += 6;
-      doc.setFontSize(8.5);
+      yPos += 5;
+      doc.setFontSize(8);
       doc.setFont("helvetica", "normal");
       doc.setTextColor(71, 85, 105);
       const params = dossier?.vulnerability_curve?.parameters;
       doc.text(`• Scientific Citation: ${params?.jrc_reference || "Huizinga et al. (2017) Africa Residential"}`, 16, yPos);
-      yPos += 5;
+      yPos += 4.5;
       doc.text(`• Physical Damage Ceiling (Cap): ${params?.cap_pct || 85}%`, 16, yPos);
-      yPos += 5;
+      yPos += 4.5;
       doc.text(`• Half-Damage Inflection Depth (Midpoint): ${params?.midpoint || 0.45} m`, 16, yPos);
-      yPos += 5;
+      yPos += 4.5;
       doc.text(`• Foundation Protection Threshold (Curb Height): ${params?.threshold_m || 0.05} m`, 16, yPos);
-      yPos += 5;
+      yPos += 4.5;
       doc.text(`• Typical Nairobi Reconstruction Rate: ${params?.typical_costs_sqm || "KES 20,000 / m²"}`, 16, yPos);
 
       // Financial Summary Box
-      yPos += 10;
+      yPos += 8;
       doc.setFillColor(240, 253, 244);
       doc.setDrawColor(187, 247, 208);
-      doc.roundedRect(14, yPos, pageWidth - 28, 26, 2, 2, "FD");
+      doc.roundedRect(14, yPos, pageWidth - 28, 23, 2, 2, "FD");
 
       doc.setTextColor(22, 101, 52);
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(10);
-      doc.text("Actuarial Reinsurance Underwriting Recommendation", 18, yPos + 7);
+      doc.setFontSize(9.5);
+      doc.text("Actuarial Reinsurance Underwriting Recommendation", 18, yPos + 6);
 
       doc.setFont("helvetica", "normal");
-      doc.setFontSize(8.5);
+      doc.setFontSize(8);
       doc.setTextColor(21, 128, 61);
       const fin = dossier?.financial_summary;
-      doc.text(`Annual Average Loss (AAL): ${formatKES(fin?.aal_gross_kes || 0)}`, 18, yPos + 14);
-      doc.text(`Pure Risk Rate: ${fin?.pure_risk_rate_pct?.toFixed(3) || "0.000"}% of TIV`, 18, yPos + 20);
-      doc.text(`Recommended Treaty Deductible: 10%`, pageWidth / 2 + 10, yPos + 14);
-      doc.text(`Technical Pure Premium: ${formatKES(fin?.recommended_premium_kes || 0)} / year`, pageWidth / 2 + 10, yPos + 20);
+      doc.text(`Annual Average Loss (AAL): ${formatKES(fin?.aal_gross_kes || 0)}`, 18, yPos + 12);
+      doc.text(`Pure Risk Rate: ${fin?.pure_risk_rate_pct?.toFixed(3) || "0.000"}% of TIV`, 18, yPos + 17);
+      doc.text(`Recommended Treaty Deductible: 10%`, pageWidth / 2 + 10, yPos + 12);
+      doc.text(`Technical Pure Premium: ${formatKES(fin?.recommended_premium_kes || 0)} / year`, pageWidth / 2 + 10, yPos + 17);
 
-      // Footer
-      doc.setFontSize(7.5);
-      doc.setTextColor(148, 163, 184);
-      doc.text("Confidential · Kenya Re Catastrophe Risk Intelligence Platform · Oasis OED & JRC Model Compliant", 14, 287);
+      // Official Kenya Re Corporate Footer
+      drawKenyaReFooter(doc, 1, 1, `KRE-DOSSIER-${asset.loc_id}`);
 
       doc.save(`KenyaRe_Asset_Dossier_${asset.loc_id}_${activeScenario}.pdf`);
-      toast.success(`✓ Downloaded Single Asset Dossier PDF for ${asset.loc_id}`);
+      toast.success(`✓ Downloaded Kenya Re Branded Asset Dossier PDF for ${asset.loc_id}`);
     } catch (err: any) {
       console.error(err);
       toast.error("Failed to generate asset PDF dossier");
@@ -932,13 +926,17 @@ export function AssetDetailModal({
                                             housing_class: item.housing_class as HousingClass,
                                             tiv_kes: item.tiv_kes,
                                             floor_area_m2: 1000,
+                                            cost_per_m2_kes: Math.round(item.tiv_kes / 1000),
+                                            synthetic: false,
+                                            hazard_score: Math.min(1.0, item.depth_m / 2.0),
                                             depth_m: item.depth_m,
                                             loss_kes: item.loss_kes,
                                             damage_ratio: item.damage_ratio,
+                                            tier_label: item.depth_m > 1.0 ? "Extreme Floodway" : "High Hazard",
                                             risk_level: "high",
                                             lat: asset.lat,
                                             lon: asset.lon,
-                                          });
+                                          } as ExposureAsset);
                                         }
                                       }}
                                       className="h-6 text-[11px] text-[#00264D] hover:bg-blue-50 px-2 cursor-pointer"
