@@ -13,7 +13,13 @@ import {
   type RP,
 } from "@/lib/api";
 import { Compass, Eye, Sparkles, Waves } from "lucide-react";
-import { NAIROBI_DRAINAGE_GEOJSON } from "@/lib/drainageData";
+import {
+  NAIROBI_DRAINAGE_GEOJSON,
+  NAIROBI_DRAINAGE_RIBBONS_GEOJSON,
+  NAIROBI_SURGE_TOWERS_GEOJSON,
+  calculateCorridorExposure,
+  lineStringToRibbonPolygon,
+} from "@/lib/drainageData";
 
 if (typeof window !== "undefined") {
   try {
@@ -52,6 +58,12 @@ export function RiskMapDeckGL({
   const [mapLoaded, setMapLoaded] = useState(false);
   const [is3D, setIs3D] = useState(true);
   const [showDrains, setShowDrains] = useState(true);
+  const [activeCorridor, setActiveCorridor] = useState<{
+    id: string;
+    name: string;
+    exposedCount: number;
+    totalTivKes: number;
+  } | null>(null);
   const [mapStyle, setMapStyle] = useState<"light" | "dark" | "satellite">("light");
 
   const [assets, setAssets] = useState<ExposureAsset[]>(propAssets || []);
@@ -99,6 +111,52 @@ export function RiskMapDeckGL({
       api.hazardHotspots(normRP).then((res) => setHotspots(res)).catch(() => {});
     }
   }, [propHotspots, normRP]);
+
+  // Animated downstream water currents along channels
+  useEffect(() => {
+    if (!mapRef.current || !mapLoaded || !showDrains) return;
+
+    const m = mapRef.current;
+    let animId: number;
+    let step = 0;
+    const dashPhases = [
+      [0, 4, 3],
+      [0.5, 4, 2.5],
+      [1, 4, 2],
+      [1.5, 4, 1.5],
+      [2, 4, 1],
+      [2.5, 4, 0.5],
+      [3, 4, 0],
+      [0, 0.5, 3, 3.5],
+      [0, 1, 3, 3],
+      [0, 1.5, 3, 2.5],
+      [0, 2, 3, 2],
+      [0, 2.5, 3, 1.5],
+      [0, 3, 3, 1],
+      [0, 3.5, 3, 0.5],
+    ];
+
+    let lastTime = 0;
+    const animate = (timestamp: number) => {
+      if (timestamp - lastTime > 65) {
+        lastTime = timestamp;
+        step = (step + 1) % dashPhases.length;
+        if (m.getLayer("drainage-flow-animated")) {
+          try {
+            m.setPaintProperty("drainage-flow-animated", "line-dasharray", dashPhases[step]);
+          } catch {
+            // style reloaded
+          }
+        }
+      }
+      animId = requestAnimationFrame(animate);
+    };
+
+    animId = requestAnimationFrame(animate);
+    return () => {
+      cancelAnimationFrame(animId);
+    };
+  }, [mapLoaded, showDrains]);
 
   const styleUrls = {
     light: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
@@ -360,15 +418,77 @@ export function RiskMapDeckGL({
     }
   }
 
-  // Render Nairobi Drainage & Stormwater Canal Network
+  // Render Nairobi Drainage & Stormwater Canal Network (3D Ribbons, Flow Currents & Surge Towers)
   function addDrainageLayers(map: maplibregl.Map) {
     if (!showDrains) {
+      if (map.getLayer("drainage-ribbons-3d")) map.removeLayer("drainage-ribbons-3d");
+      if (map.getLayer("drainage-surge-towers-3d")) map.removeLayer("drainage-surge-towers-3d");
+      if (map.getLayer("drainage-surge-towers-ring")) map.removeLayer("drainage-surge-towers-ring");
+      if (map.getLayer("drainage-corridor-buffer-fill")) map.removeLayer("drainage-corridor-buffer-fill");
+      if (map.getLayer("drainage-corridor-buffer-stroke")) map.removeLayer("drainage-corridor-buffer-stroke");
+      if (map.getLayer("drainage-flow-animated")) map.removeLayer("drainage-flow-animated");
       if (map.getLayer("drainage-lines-main")) map.removeLayer("drainage-lines-main");
       if (map.getLayer("drainage-lines-glow")) map.removeLayer("drainage-lines-glow");
+      if (map.getSource("drainage-ribbons-source")) map.removeSource("drainage-ribbons-source");
+      if (map.getSource("drainage-surge-towers-source")) map.removeSource("drainage-surge-towers-source");
+      if (map.getSource("drainage-corridor-buffer-source")) map.removeSource("drainage-corridor-buffer-source");
       if (map.getSource("drainage-source")) map.removeSource("drainage-source");
       return;
     }
 
+    // 1. 3D Volumetric Water Ribbons
+    if (map.getSource("drainage-ribbons-source")) {
+      (map.getSource("drainage-ribbons-source") as maplibregl.GeoJSONSource).setData(NAIROBI_DRAINAGE_RIBBONS_GEOJSON as any);
+    } else {
+      map.addSource("drainage-ribbons-source", {
+        type: "geojson",
+        data: NAIROBI_DRAINAGE_RIBBONS_GEOJSON as any,
+      });
+
+      map.addLayer({
+        id: "drainage-ribbons-3d",
+        type: "fill-extrusion",
+        source: "drainage-ribbons-source",
+        paint: {
+          "fill-extrusion-height": ["get", "extrusion_height"],
+          "fill-extrusion-base": 0,
+          "fill-extrusion-color": ["get", "color"],
+          "fill-extrusion-opacity": 0.82,
+        },
+      });
+    }
+
+    // 2. 150m Corridor Exposure Buffer Highlight
+    if (!map.getSource("drainage-corridor-buffer-source")) {
+      map.addSource("drainage-corridor-buffer-source", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+
+      map.addLayer({
+        id: "drainage-corridor-buffer-fill",
+        type: "fill",
+        source: "drainage-corridor-buffer-source",
+        paint: {
+          "fill-color": "#38bdf8",
+          "fill-opacity": 0.22,
+        },
+      });
+
+      map.addLayer({
+        id: "drainage-corridor-buffer-stroke",
+        type: "line",
+        source: "drainage-corridor-buffer-source",
+        paint: {
+          "line-color": "#0284c7",
+          "line-width": 1.8,
+          "line-dasharray": [3, 2],
+          "line-opacity": 0.85,
+        },
+      });
+    }
+
+    // 3. Drainage Vector Lines & Animated Currents
     if (map.getSource("drainage-source")) {
       (map.getSource("drainage-source") as maplibregl.GeoJSONSource).setData(NAIROBI_DRAINAGE_GEOJSON as any);
     } else {
@@ -384,8 +504,8 @@ export function RiskMapDeckGL({
         layout: { "line-join": "round", "line-cap": "round" },
         paint: {
           "line-color": ["case", ["==", ["get", "ai_bottleneck"], true], "#f59e0b", "#0284c7"],
-          "line-width": ["interpolate", ["linear"], ["zoom"], 11, 4, 16, 9],
-          "line-opacity": 0.32,
+          "line-width": ["interpolate", ["linear"], ["zoom"], 11, 4, 16, 10],
+          "line-opacity": 0.35,
         },
       });
 
@@ -396,54 +516,220 @@ export function RiskMapDeckGL({
         layout: { "line-join": "round", "line-cap": "round" },
         paint: {
           "line-color": ["case", ["==", ["get", "ai_bottleneck"], true], "#ef4444", "#0ea5e9"],
-          "line-width": ["interpolate", ["linear"], ["zoom"], 11, 2.0, 16, 4.2],
+          "line-width": ["interpolate", ["linear"], ["zoom"], 11, 2.0, 16, 4.5],
           "line-opacity": 0.95,
         },
       });
 
-      map.on("click", "drainage-lines-main", (e) => {
+      map.addLayer({
+        id: "drainage-flow-animated",
+        type: "line",
+        source: "drainage-source",
+        layout: { "line-join": "round", "line-cap": "round" },
+        paint: {
+          "line-color": ["case", ["==", ["get", "ai_bottleneck"], true], "#fef08a", "#e0f2fe"],
+          "line-width": ["interpolate", ["linear"], ["zoom"], 11, 1.8, 16, 3.5],
+          "line-dasharray": [0, 4, 3],
+          "line-opacity": 0.95,
+        },
+      });
+    }
+
+    // 4. 3D Bottleneck Surge Towers
+    if (map.getSource("drainage-surge-towers-source")) {
+      (map.getSource("drainage-surge-towers-source") as maplibregl.GeoJSONSource).setData(NAIROBI_SURGE_TOWERS_GEOJSON as any);
+    } else {
+      map.addSource("drainage-surge-towers-source", {
+        type: "geojson",
+        data: NAIROBI_SURGE_TOWERS_GEOJSON as any,
+      });
+
+      map.addLayer({
+        id: "drainage-surge-towers-3d",
+        type: "fill-extrusion",
+        source: "drainage-surge-towers-source",
+        paint: {
+          "fill-extrusion-height": ["get", "tower_height"],
+          "fill-extrusion-base": 0,
+          "fill-extrusion-color": ["get", "color"],
+          "fill-extrusion-opacity": 0.72,
+        },
+      });
+
+      map.addLayer({
+        id: "drainage-surge-towers-ring",
+        type: "circle",
+        source: "drainage-surge-towers-source",
+        paint: {
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 11, 8, 15, 18],
+          "circle-color": ["get", "color"],
+          "circle-opacity": 0.25,
+          "circle-stroke-width": 2,
+          "circle-stroke-color": ["get", "color"],
+        },
+      });
+
+      map.on("click", "drainage-surge-towers-ring", (e) => {
         if (!e.features || !e.features[0]) return;
         const p = e.features[0].properties as any;
         if (!p) return;
-        const isBottleneck = p.ai_bottleneck === "true" || p.ai_bottleneck === true;
-        const statusBadge = isBottleneck
-          ? `<div style="display:inline-block;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:700;margin:3px 0;">⚠️ AI Siltation Choke Point · High Overtopping Probability</div>`
-          : `<div style="display:inline-block;background:#F0FDF4;color:#16A34A;border:1px solid #BBF7D0;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:700;margin:3px 0;">✓ Open Flow Artery</div>`;
 
-        new maplibregl.Popup({ offset: 10, closeButton: true })
+        map.flyTo({
+          center: [Number(p.lng), Number(p.lat)],
+          zoom: 15.2,
+          pitch: 62,
+          bearing: -24,
+          duration: 1800,
+          essential: true,
+        });
+
+        new maplibregl.Popup({ offset: 14, closeButton: true, maxWidth: "340px" })
           .setLngLat(e.lngLat)
           .setHTML(`
-            <div style="font-family: system-ui, -apple-system, sans-serif; font-size: 12px; color: #1E293B; min-width: 220px; padding: 2px;">
-              <div style="font-weight: 700; color: #00264D; font-size: 13px; line-height: 1.25;">💧 ${p.name}</div>
-              <div style="color: #64748B; font-size: 11px; margin-top: 1px;">Type: <strong style="color: #0F172A;">${p.type_label}</strong></div>
-              ${statusBadge}
-              <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 6px; font-size: 11px; margin-top: 4px;">
-                <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
-                  <span style="color: #64748B;">Catchment:</span>
-                  <strong style="color: #0F172A;">${p.catchment}</strong>
+            <div style="font-family: system-ui, -apple-system, sans-serif; font-size: 12px; color: #1E293B; min-width: 250px; padding: 2px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
+                <span style="background:#FEE2E2;color:#DC2626;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;">⚠️ 3D SURGE TOWER</span>
+                <span style="font-size:10px;color:#64748B;font-family:monospace;font-weight:700;">${p.tower_height}m Elevation</span>
+              </div>
+              <div style="font-weight: 700; color: #00264D; font-size: 13px; margin-top: 4px; line-height: 1.25;">${p.name}</div>
+              <div style="color: #64748B; font-size: 11px; margin-top: 1px;">Basin: <strong style="color: #0F172A;">${p.catchment}</strong></div>
+
+              <div style="background: #FEF2F2; border: 1px solid #FECACA; border-radius: 6px; padding: 7px; margin-top: 6px; font-size: 11px;">
+                <div style="display:flex; justify-content:space-between; margin-bottom: 3px;">
+                  <span style="color: #7F1D1D;">Siltation Capacity Loss:</span>
+                  <strong style="color: #DC2626; font-family: monospace;">${p.siltation_loss_pct}% Clogged</strong>
                 </div>
-                <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
-                  <span style="color: #64748B;">Peak Discharge:</span>
-                  <strong style="color: #0284C7; font-family: monospace;">${p.capacity_m3s} m³/s</strong>
+                <div style="display:flex; justify-content:space-between; margin-bottom: 3px;">
+                  <span style="color: #7F1D1D;">Backwater Surge Head:</span>
+                  <strong style="color: #DC2626; font-family: monospace;">+${p.surge_head_m}m</strong>
                 </div>
                 <div style="display:flex; justify-content:space-between;">
-                  <span style="color: #64748B;">Channel Width:</span>
-                  <strong style="color: #0F172A; font-family: monospace;">${p.width_m} m</strong>
+                  <span style="color: #7F1D1D;">Overtopping Risk:</span>
+                  <strong style="color: #B91C1C;">${p.overtopping_prob}</strong>
                 </div>
               </div>
-              <p style="color: #475569; font-size: 10.5px; margin-top: 5px; line-height: 1.35;">${p.description}</p>
+
+              <p style="color: #475569; font-size: 10.5px; margin-top: 6px; line-height: 1.35;">${p.description}</p>
             </div>
           `)
           .addTo(map);
       });
-
-      map.on("mouseenter", "drainage-lines-main", () => {
-        map.getCanvas().style.cursor = "pointer";
-      });
-      map.on("mouseleave", "drainage-lines-main", () => {
-        map.getCanvas().style.cursor = "";
-      });
     }
+
+    // 5. Interactive 3D Corridor Fly-Along & 150m Proximity Scan
+    const handleDrainageClick = (e: maplibregl.MapMouseEvent & { features?: any[] }) => {
+      if (!e.features || !e.features[0]) return;
+      const feat = e.features[0];
+      const p = feat.properties as any;
+      if (!p) return;
+
+      const orig = NAIROBI_DRAINAGE_GEOJSON.features.find((f) => f.id === p.id || f.properties.name === p.name);
+      const coords = orig?.geometry.coordinates || [];
+      if (coords.length < 2) return;
+
+      const exposure = calculateCorridorExposure(coords, assets, 150);
+      setActiveCorridor({
+        id: p.id,
+        name: p.name,
+        exposedCount: exposure.exposedCount,
+        totalTivKes: exposure.totalTivKes,
+      });
+
+      const bufferRing = lineStringToRibbonPolygon(coords, 300);
+      if (map.getSource("drainage-corridor-buffer-source")) {
+        (map.getSource("drainage-corridor-buffer-source") as maplibregl.GeoJSONSource).setData({
+          type: "FeatureCollection",
+          features: [
+            {
+              type: "Feature",
+              geometry: { type: "Polygon", coordinates: [bufferRing] },
+              properties: {},
+            },
+          ],
+        });
+      }
+
+      const midIdx = Math.floor(coords.length / 2);
+      const midLng = coords[midIdx][0];
+      const midLat = coords[midIdx][1];
+      const p1 = coords[Math.max(0, midIdx - 1)];
+      const p2 = coords[Math.min(coords.length - 1, midIdx + 1)];
+      const bearing = Math.round((Math.atan2(p2[0] - p1[0], p2[1] - p1[1]) * 180) / Math.PI);
+
+      map.flyTo({
+        center: [midLng, midLat],
+        zoom: 14.6,
+        pitch: 62,
+        bearing: bearing,
+        duration: 2000,
+        essential: true,
+      });
+
+      const isBottleneck = p.ai_bottleneck === "true" || p.ai_bottleneck === true;
+      const statusBadge = isBottleneck
+        ? `<div style="display:inline-block;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:700;margin:3px 0;">⚠️ AI Siltation Bottleneck · High Overtopping Probability</div>`
+        : `<div style="display:inline-block;background:#F0FDF4;color:#16A34A;border:1px solid #BBF7D0;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:700;margin:3px 0;">✓ Open Flow Artery</div>`;
+
+      const exposedAssetsList = exposure.exposedAssets.slice(0, 3).map((a: any) =>
+        `<li style="margin-top:2px;display:flex;justify-content:space-between;gap:8px;">
+          <span style="max-width:145px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#1E293B;">${a.name || a.ward} (${a.loc_id})</span>
+          <span style="font-family:monospace;font-weight:600;color:#00264D;">${formatKES(a.tiv_kes)}</span>
+        </li>`
+      ).join("");
+
+      new maplibregl.Popup({ offset: 12, closeButton: true, maxWidth: "340px" })
+        .setLngLat(e.lngLat)
+        .setHTML(`
+          <div style="font-family: system-ui, -apple-system, sans-serif; font-size: 12px; color: #1E293B; min-width: 250px; padding: 2px;">
+            <div style="font-weight: 700; color: #00264D; font-size: 13px; line-height: 1.25;">🌊 ${p.name}</div>
+            <div style="color: #64748B; font-size: 11px; margin-top: 1px;">Type: <strong style="color: #0F172A;">${p.type_label}</strong> · Width: <strong style="color: #0284c7;">${p.width_m}m</strong></div>
+            ${statusBadge}
+            
+            <div style="background: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 6px; padding: 7px; margin-top: 6px;">
+              <div style="font-size: 10px; font-weight: 700; color: #1E40AF; text-transform: uppercase;">⚡ 150m Corridor Exposure Scan</div>
+              <div style="display:flex; justify-content:space-between; margin-top: 4px; font-size: 11px;">
+                <span style="color: #475569;">Insured Assets in Corridor:</span>
+                <strong style="color: ${exposure.exposedCount > 0 ? '#DC2626' : '#16A34A'};">${exposure.exposedCount} Properties</strong>
+              </div>
+              <div style="display:flex; justify-content:space-between; margin-top: 2px; font-size: 11px;">
+                <span style="color: #475569;">Aggregate TIV at Risk:</span>
+                <strong style="color: #00264D; font-family: monospace;">${formatKES(exposure.totalTivKes)}</strong>
+              </div>
+              ${exposure.maxDepthM > 0 ? `
+                <div style="display:flex; justify-content:space-between; margin-top: 2px; font-size: 11px;">
+                  <span style="color: #475569;">Max Modeled Depth:</span>
+                  <strong style="color: #DC2626; font-family: monospace;">${exposure.maxDepthM.toFixed(2)}m</strong>
+                </div>
+              ` : ''}
+              ${exposedAssetsList ? `
+                <div style="margin-top: 5px; padding-top: 4px; border-top: 1px dashed #BFDBFE; font-size: 10px;">
+                  <ul style="padding-left:0;list-style:none;margin:0;">
+                    ${exposedAssetsList}
+                  </ul>
+                </div>
+              ` : ''}
+            </div>
+
+            <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 6px; font-size: 11px; margin-top: 6px;">
+              <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
+                <span style="color: #64748B;">Catchment Basin:</span>
+                <strong style="color: #0F172A;">${p.catchment}</strong>
+              </div>
+              <div style="display:flex; justify-content:space-between;">
+                <span style="color: #64748B;">Peak Discharge:</span>
+                <strong style="color: #0284C7; font-family: monospace;">${p.capacity_m3s} m³/s</strong>
+              </div>
+            </div>
+            <p style="color: #475569; font-size: 10px; margin-top: 5px; line-height: 1.35;">${p.description}</p>
+          </div>
+        `)
+        .addTo(map);
+    };
+
+    map.on("click", "drainage-lines-main", handleDrainageClick);
+    map.on("click", "drainage-ribbons-3d", handleDrainageClick);
+    map.on("mouseenter", "drainage-lines-main", () => { map.getCanvas().style.cursor = "pointer"; });
+    map.on("mouseleave", "drainage-lines-main", () => { map.getCanvas().style.cursor = ""; });
   }
 
   // Update layers when assets, hotspots or props change
@@ -518,6 +804,29 @@ export function RiskMapDeckGL({
   return (
     <div className="relative h-full w-full">
       <div ref={mapContainer} className="h-full w-full" />
+
+      {/* Active Corridor Exposure Chip */}
+      {activeCorridor && (
+        <div className="absolute top-4 left-4 z-10 flex items-center gap-2 bg-white/95 border border-sky-200 text-sky-950 rounded-lg px-3 py-1.5 text-xs font-medium shadow-md backdrop-blur">
+          <span className="font-bold">🌊 {activeCorridor.name}:</span>
+          <span>{activeCorridor.exposedCount} assets ({formatKES(activeCorridor.totalTivKes)})</span>
+          <button
+            onClick={() => {
+              setActiveCorridor(null);
+              if (mapRef.current?.getSource("drainage-corridor-buffer-source")) {
+                (mapRef.current.getSource("drainage-corridor-buffer-source") as maplibregl.GeoJSONSource).setData({
+                  type: "FeatureCollection",
+                  features: [],
+                });
+              }
+            }}
+            className="ml-1 text-sky-700 hover:text-red-600 font-bold cursor-pointer"
+            title="Clear corridor highlight"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Map Controls */}
       <div className="absolute top-4 right-4 flex flex-col gap-2">

@@ -276,10 +276,10 @@ export default function LandingPage() {
 
     <div className="flex items-center gap-2">
       <Link
-        href="/login"
+        href="/dashboard"
         className="hidden items-center gap-2 rounded-lg bg-[#D21245] px-4 py-2.5 text-xs font-bold text-white transition-all duration-300 hover:-translate-y-0.5 hover:bg-[#B50F3B] hover:shadow-lg sm:inline-flex"
       >
-        Login to Console
+        Open Dashboard
         <ArrowRight className="size-3.5" />
       </Link>
       <button
@@ -801,8 +801,8 @@ export default function LandingPage() {
             <a href="#pipeline" className="font-semibold hover:text-[#00264D]">
               Methodology
             </a>
-            <Link href="/login" className="font-semibold text-[#00264D] hover:text-[#D21245]">
-              Live Console
+            <Link href="/dashboard" className="font-semibold text-[#00264D] hover:text-[#D21245]">
+              Live Dashboard
             </Link>
           </div>
         </div>

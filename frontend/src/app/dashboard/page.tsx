@@ -1175,13 +1175,13 @@ function HazardPanel({
             <span className="font-bold text-[#00264D] uppercase text-[10px] tracking-wider">Legend:</span>
             
             <div className="flex items-center gap-1.5 text-slate-700">
-              <span className="w-4 h-1 rounded-full bg-[#0ea5e9] inline-block shadow-2xs"></span>
-              <span>Open Drains & Rivers</span>
+              <span className="w-4 h-1.5 rounded-full bg-[#0ea5e9] inline-block shadow-2xs"></span>
+              <span>3D Water Ribbons & Flow Currents</span>
             </div>
 
             <div className="flex items-center gap-1.5 text-slate-700">
-              <span className="w-4 h-1 rounded-full bg-[#ef4444] inline-block shadow-2xs"></span>
-              <span>AI Clogging Bottlenecks</span>
+              <span className="w-2.5 h-3.5 rounded-xs bg-[#ef4444] border border-red-700 inline-block shadow-2xs"></span>
+              <span>3D Bottleneck Surge Towers</span>
             </div>
 
             <div className="flex items-center gap-1.5 text-slate-700">
@@ -1201,7 +1201,7 @@ function HazardPanel({
           </div>
 
           <div className="text-slate-500 font-medium text-[10px] flex items-center gap-1">
-            <span>💡 Click any drain line on the map to inspect capacity & clogging diagnosis</span>
+            <span>💡 Click any 3D channel or surge tower to fly along corridor & scan 150m portfolio exposure</span>
           </div>
         </div>
       </div>

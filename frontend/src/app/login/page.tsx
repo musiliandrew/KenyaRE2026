@@ -6,7 +6,7 @@ import { useEffect } from "react";
 export default function LoginPage() {
   const router = useRouter();
   useEffect(() => {
-    router.push("/console");
+    router.push("/dashboard");
   }, [router]);
   return null;
 }
