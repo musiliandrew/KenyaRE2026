@@ -200,7 +200,6 @@ function Reveal({
 
 const globalCss = `
 @keyframes kenburns { 0% { transform: scale(1.02); } 100% { transform: scale(1.1); } }
-@keyframes rain { 0% { background-position: 0 0; } 100% { background-position: -60px 240px; } }
 @keyframes ticker { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
 @keyframes drawline { to { stroke-dashoffset: 0; } }
 @keyframes fadearea { to { opacity: 1; } }
@@ -209,14 +208,6 @@ const globalCss = `
 @keyframes floaty { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
 @keyframes drift { 0% { background-position: 0 0; } 100% { background-position: 44px 44px; } }
 .anim-kenburns { animation: kenburns 24s ease-in-out infinite alternate; }
-.anim-rain {
-  background-image: repeating-linear-gradient(105deg, rgba(255,255,255,0.08) 0 1px, transparent 1px 28px);
-  background-size: 60px 240px; animation: rain 1.6s linear infinite;
-}
-.anim-rain-light {
-  background-image: repeating-linear-gradient(105deg, rgba(0,38,77,0.12) 0 1px, transparent 1px 22px);
-  background-size: 60px 240px; animation: rain 1.8s linear infinite;
-}
 .anim-ticker { animation: ticker 32s linear infinite; }
 .anim-ripple { animation: ripple 2.4s ease-out infinite; }
 .anim-floaty { animation: floaty 5s ease-in-out infinite; }
@@ -235,7 +226,7 @@ const globalCss = `
 .ep-dot { transform: scale(0); transform-box: fill-box; transform-origin: center; }
 .ep-dot.on { animation: popdot 0.4s ease-out forwards; }
 @media (prefers-reduced-motion: reduce) {
-  .anim-kenburns, .anim-rain, .anim-rain-light, .anim-ticker, .anim-ripple, .anim-floaty, .dots { animation: none; }
+  .anim-kenburns, .anim-ticker, .anim-ripple, .anim-floaty, .dots { animation: none; }
   .ep-line { stroke-dashoffset: 0; } .ep-area { opacity: 1; } .ep-dot { transform: scale(1); }
   .ep-line.on, .ep-area.on, .ep-dot.on { animation: none; }
 }
