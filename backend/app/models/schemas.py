@@ -85,6 +85,7 @@ class EPCurveResponse(BaseModel):
     metrics: List[ReturnPeriodMetric]
     total_tiv_kes: float
     aal_kes: float
+    baseline_aal_kes: Optional[float] = None
     ai_enabled: bool
 
 
@@ -95,6 +96,8 @@ class PortfolioSummary(BaseModel):
     asset_count: int
     active_rp: str
     hotspot_count: int
+    pml_100y_kes: float = 0.0
+    loss_ratio: float = 0.0
     synthetic_notice: str = "All values synthetic for hackathon evaluation."
 
 
@@ -114,8 +117,11 @@ class RunModelResponse(BaseModel):
     ai_enabled: bool
     ai_delta_kes: Optional[float] = None
     loss_by_class: Dict[str, float]
+    loss_by_ward: Dict[str, float] = {}
     top_losses: List[Dict[str, Any]]
     ep_curve: List[ReturnPeriodMetric]
+    aal_ai_delta_kes: Optional[float] = None
+    source: str = "baseline_portfolio"
 
 
 class NLPParseRequest(BaseModel):

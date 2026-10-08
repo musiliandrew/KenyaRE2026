@@ -4,17 +4,16 @@ import { useEffect, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import {
-  BUILDINGS,
-  HOTSPOTS,
-  riskLevel,
+  api,
   formatKES,
   CLASS_LABEL,
-  type Building,
+  type ExposureAsset,
   type HousingClass,
   type Hotspot,
-  type ReturnPeriod,
-} from "@/lib/cat-model";
-import { Layers, Compass, Eye, Sparkles } from "lucide-react";
+  type RP,
+} from "@/lib/api";
+import { Layers, Compass, Eye, Sparkles, Waves } from "lucide-react";
+import { NAIROBI_DRAINAGE_GEOJSON } from "@/lib/drainageData";
 
 const MAPBOX_TOKEN =
   process.env.NEXT_PUBLIC_MAPBOX_TOKEN ||
@@ -23,30 +22,80 @@ const MAPBOX_TOKEN =
   "";
 
 export function RiskMap({
-  rp,
-  filter,
-  showHotspots,
+  rp = "25y",
+  filter = "all",
+  showHotspots = true,
+  assets: propAssets,
+  hotspots: propHotspots,
   selectedBuilding,
   selectedHotspot,
   onSelectBuilding,
   onSelectHotspot,
 }: {
-  rp: ReturnPeriod;
-  filter: HousingClass | "all";
-  showHotspots: boolean;
-  selectedBuilding?: Building | null;
+  rp?: RP | number;
+  filter?: HousingClass | "all";
+  showHotspots?: boolean;
+  assets?: ExposureAsset[];
+  hotspots?: Hotspot[];
+  selectedBuilding?: ExposureAsset | null;
   selectedHotspot?: Hotspot | null;
-  onSelectBuilding: (b: Building) => void;
-  onSelectHotspot: (h: Hotspot) => void;
+  onSelectBuilding?: (b: ExposureAsset) => void;
+  onSelectHotspot?: (h: Hotspot) => void;
 }) {
+  const normRP: RP = typeof rp === "number" ? (`${rp}y` as RP) : rp;
+
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [is3D, setIs3D] = useState(true);
+  const [showDrains, setShowDrains] = useState(true);
   const [mapStyle, setMapStyle] = useState<"light" | "dark" | "satellite">("light");
+
+  const [assets, setAssets] = useState<ExposureAsset[]>(propAssets || []);
+  const [hotspots, setHotspots] = useState<Hotspot[]>(propHotspots || []);
 
   const cb = useRef({ onSelectBuilding, onSelectHotspot });
   cb.current = { onSelectBuilding, onSelectHotspot };
+
+  // Sync or fetch dynamic assets & hotspots
+  useEffect(() => {
+    if (propAssets !== undefined) {
+      setAssets(propAssets);
+    } else {
+      api.exposureAssets(normRP, { limit: 1000 }).then((res) => setAssets(res.assets)).catch(() => {});
+    }
+  }, [propAssets, normRP]);
+
+  // Auto-fit map bounds when assets list changes (e.g. fly to Mandera or Nairobi)
+  useEffect(() => {
+    if (map.current && mapLoaded && assets.length > 0) {
+      try {
+        const bounds = new mapboxgl.LngLatBounds();
+        let valid = 0;
+        assets.forEach((a) => {
+          const lng = (a as any).lng ?? a.lon;
+          const lat = a.lat;
+          if (typeof lng === "number" && typeof lat === "number" && !isNaN(lng) && !isNaN(lat)) {
+            bounds.extend([lng, lat]);
+            valid++;
+          }
+        });
+        if (valid > 0) {
+          map.current.fitBounds(bounds, { padding: 60, maxZoom: 14.5, duration: 1200 });
+        }
+      } catch (err) {
+        console.warn("Failed to fit map bounds", err);
+      }
+    }
+  }, [assets, mapLoaded]);
+
+  useEffect(() => {
+    if (propHotspots && propHotspots.length) {
+      setHotspots(propHotspots);
+    } else {
+      api.hazardHotspots(normRP).then((res) => setHotspots(res)).catch(() => {});
+    }
+  }, [propHotspots, normRP]);
 
   const styleUrls = {
     light: "mapbox://styles/mapbox/light-v11",
@@ -108,9 +157,10 @@ export function RiskMap({
   // 3. Zoom into Selected Building with 3D Camera FlyTo
   useEffect(() => {
     if (!map.current || !mapLoaded || !selectedBuilding) return;
+    const bLng = (selectedBuilding as any).lng ?? selectedBuilding.lon;
 
     map.current.flyTo({
-      center: [selectedBuilding.lng, selectedBuilding.lat],
+      center: [bLng, selectedBuilding.lat],
       zoom: 16.5,
       pitch: is3D ? 62 : 0,
       bearing: is3D ? -15 : 0,
@@ -123,9 +173,10 @@ export function RiskMap({
   // 4. Zoom into Selected Hotspot with 3D Camera FlyTo
   useEffect(() => {
     if (!map.current || !mapLoaded || !selectedHotspot) return;
+    const hLng = (selectedHotspot as any).lng ?? selectedHotspot.lon;
 
     map.current.flyTo({
-      center: [selectedHotspot.lng, selectedHotspot.lat],
+      center: [hLng, selectedHotspot.lat],
       zoom: 15.2,
       pitch: is3D ? 58 : 0,
       bearing: is3D ? -12 : 0,
@@ -226,30 +277,31 @@ export function RiskMap({
       renderLayers(map.current);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rp, filter, showHotspots, selectedBuilding, selectedHotspot, mapLoaded]);
+  }, [normRP, filter, showHotspots, showDrains, selectedBuilding, selectedHotspot, mapLoaded, assets, hotspots]);
 
   function renderLayers(m: mapboxgl.Map) {
     // --- BUILDINGS GEOJSON ---
-    const filteredBuildings = BUILDINGS.filter(
-      (b) => filter === "all" || b.cls === filter
+    const filteredBuildings = assets.filter(
+      (b) => filter === "all" || b.housing_class === filter
     );
 
     const buildingFeatures: GeoJSON.Feature[] = filteredBuildings.map((b) => {
-      const lvl = riskLevel(b, rp);
-      const isSelected = selectedBuilding?.id === b.id;
+      const lvl = b.risk_level || (b.hazard_score > 0.6 ? "high" : b.hazard_score > 0.3 ? "mid" : "low");
+      const isSelected = selectedBuilding?.loc_id === b.loc_id || (selectedBuilding as any)?.id === b.loc_id;
+      const lng = (b as any).lng ?? b.lon;
       return {
         type: "Feature",
         geometry: {
           type: "Point",
-          coordinates: [b.lng, b.lat],
+          coordinates: [lng, b.lat],
         },
         properties: {
-          id: b.id,
+          id: b.loc_id,
           ward: b.ward,
-          cls: b.cls,
-          area: b.area,
-          tiv: b.tiv,
-          depth100: b.depth100,
+          cls: b.housing_class,
+          area: b.floor_area_m2,
+          tiv: b.tiv_kes,
+          depth100: b.depth_m,
           risk: lvl,
           color: isSelected ? "#00264D" : lvl === "high" ? "#D21245" : lvl === "mid" ? "#D97706" : "#16A34A",
           radius: isSelected ? 8 : lvl === "high" ? 6 : 4.5,
@@ -292,13 +344,58 @@ export function RiskMap({
         },
       });
 
-      // Click event on property pin
+      // Click event on property pin with rich popup & selection callback
       m.on("click", "buildings-points", (e) => {
         if (!e.features || !e.features[0]) return;
         const id = e.features[0].properties?.id;
-        const b = BUILDINGS.find((item) => item.id === id);
+        const b = assets.find((item) => item.loc_id === id || (item as any).id === id);
         if (b) {
-          cb.current.onSelectBuilding(b);
+          if (cb.current.onSelectBuilding) {
+            cb.current.onSelectBuilding(b);
+          }
+
+          const lng = (b as any).lng ?? b.lon;
+          const lat = b.lat;
+          const depthVal = typeof b.depth_m === "number" ? b.depth_m.toFixed(2) : "0.00";
+          const lossVal = formatKES(b.loss_kes || 0);
+          const tivVal = formatKES(b.tiv_kes || 0);
+          const fileBadge = b.source_file
+            ? `<div style="display:inline-block;background:#EEF2F6;color:#00264D;border:1px solid #CBD5E1;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:600;margin:3px 0;">📄 ${b.source_file}</div>`
+            : "";
+          const classLabel = (CLASS_LABEL as any)[b.housing_class] || b.housing_class.replace(/_/g, " ");
+
+          new mapboxgl.Popup({ offset: 12, closeButton: true, className: "kenya-re-point-popup" })
+            .setLngLat([lng, lat])
+            .setHTML(`
+              <div style="font-family: system-ui, -apple-system, sans-serif; font-size: 12px; color: #1E293B; min-width: 210px; padding: 2px;">
+                <div style="font-weight: 700; color: #00264D; font-size: 13px; line-height: 1.25;">${b.name || b.loc_id}</div>
+                ${fileBadge}
+                <div style="color: #64748B; font-size: 11px; margin-top: 2px;">Ward / Area: <strong style="color: #1E293B;">${b.ward}</strong></div>
+                <div style="color: #64748B; font-size: 11px; margin-bottom: 6px;">Class: <strong style="color: #1E293B; text-transform: capitalize;">${classLabel}</strong></div>
+                <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 6px; font-size: 11px;">
+                  <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
+                    <span style="color: #64748B;">TIV Exposure:</span>
+                    <strong style="color: #0F172A; font-family: monospace;">${tivVal}</strong>
+                  </div>
+                  <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
+                    <span style="color: #64748B;">Flood Depth:</span>
+                    <strong style="color: #D21245; font-family: monospace;">${depthVal} m</strong>
+                  </div>
+                  <div style="display:flex; justify-content:space-between;">
+                    <span style="color: #64748B;">Modeled Loss:</span>
+                    <strong style="color: #B91C1C; font-family: monospace;">${lossVal}</strong>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onclick="window.dispatchEvent(new CustomEvent('kenya_re_inspect_asset', { detail: '${b.loc_id || (b as any).id}' }))"
+                  style="margin-top: 7px; width: 100%; background: #00264D; color: white; border: none; border-radius: 6px; padding: 5px 8px; font-size: 11px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);"
+                >
+                  <span>🔍 Inspect Full Dossier →</span>
+                </button>
+              </div>
+            `)
+            .addTo(m);
         }
       });
 
@@ -312,6 +409,7 @@ export function RiskMap({
     }
 
     // --- SELECTED BUILDING HIGHLIGHT RING ---
+    const selLng = selectedBuilding ? ((selectedBuilding as any).lng ?? selectedBuilding.lon) : 0;
     const selectedFeatureData: GeoJSON.FeatureCollection = selectedBuilding
       ? {
           type: "FeatureCollection",
@@ -320,7 +418,7 @@ export function RiskMap({
               type: "Feature",
               geometry: {
                 type: "Point",
-                coordinates: [selectedBuilding.lng, selectedBuilding.lat],
+                coordinates: [selLng, selectedBuilding.lat],
               },
               properties: {},
             },
@@ -357,19 +455,22 @@ export function RiskMap({
     }
 
     // --- HOTSPOTS GEOJSON ---
-    const hotspotFeatures: GeoJSON.Feature[] = HOTSPOTS.map((h) => ({
-      type: "Feature",
-      geometry: {
-        type: "Point",
-        coordinates: [h.lng, h.lat],
-      },
-      properties: {
-        name: h.name,
-        demDetected: h.demDetected,
-        aiDetected: h.aiDetected,
-        color: h.demDetected ? "#16A34A" : "#D21245",
-      },
-    }));
+    const hotspotFeatures: GeoJSON.Feature[] = hotspots.map((h) => {
+      const lng = (h as any).lng ?? h.lon;
+      const isHigh = (h.hazard_score ?? 0) > 0.5 || h.tier_label === "High" || h.tier_label === "Extreme";
+      return {
+        type: "Feature",
+        geometry: {
+          type: "Point",
+          coordinates: [lng, h.lat],
+        },
+        properties: {
+          name: h.name,
+          tier_label: h.tier_label,
+          color: isHigh ? "#D21245" : "#16A34A",
+        },
+      };
+    });
 
     const hotspotSourceData: GeoJSON.FeatureCollection = {
       type: "FeatureCollection",
@@ -413,8 +514,8 @@ export function RiskMap({
       m.on("click", "hotspots-rings", (e) => {
         if (!e.features || !e.features[0]) return;
         const name = e.features[0].properties?.name;
-        const h = HOTSPOTS.find((item) => item.name === name);
-        if (h) {
+        const h = hotspots.find((item) => item.name === name);
+        if (h && cb.current.onSelectHotspot) {
           cb.current.onSelectHotspot(h);
         }
       });
@@ -423,6 +524,119 @@ export function RiskMap({
         m.getCanvas().style.cursor = "pointer";
       });
       m.on("mouseleave", "hotspots-rings", () => {
+        m.getCanvas().style.cursor = "";
+      });
+    }
+
+    // --- DRAINAGE & STORMWATER NETWORK GEOJSON ---
+    const drainageSourceData = showDrains
+      ? NAIROBI_DRAINAGE_GEOJSON
+      : { type: "FeatureCollection", features: [] };
+
+    if (m.getSource("drainage-source")) {
+      (m.getSource("drainage-source") as mapboxgl.GeoJSONSource).setData(drainageSourceData as any);
+    } else {
+      m.addSource("drainage-source", {
+        type: "geojson",
+        data: drainageSourceData as any,
+      });
+
+      // 1. Soft Outer Glow Layer for Waterways
+      m.addLayer({
+        id: "drainage-lines-glow",
+        type: "line",
+        source: "drainage-source",
+        layout: {
+          "line-join": "round",
+          "line-cap": "round",
+        },
+        paint: {
+          "line-color": [
+            "case",
+            ["==", ["get", "ai_bottleneck"], true],
+            "#f59e0b",
+            "#0284c7",
+          ],
+          "line-width": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            11, 4,
+            16, 9,
+          ],
+          "line-opacity": 0.32,
+        },
+      });
+
+      // 2. High-Contrast Crisp Vector Line
+      m.addLayer({
+        id: "drainage-lines-main",
+        type: "line",
+        source: "drainage-source",
+        layout: {
+          "line-join": "round",
+          "line-cap": "round",
+        },
+        paint: {
+          "line-color": [
+            "case",
+            ["==", ["get", "ai_bottleneck"], true],
+            "#ef4444",
+            "#0ea5e9",
+          ],
+          "line-width": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            11, 2.0,
+            16, 4.2,
+          ],
+          "line-opacity": 0.95,
+        },
+      });
+
+      // Interactive Click Popup on Drainage Channel
+      m.on("click", "drainage-lines-main", (e) => {
+        if (!e.features || !e.features[0]) return;
+        const p = e.features[0].properties as any;
+        if (!p) return;
+
+        const isBottleneck = p.ai_bottleneck === "true" || p.ai_bottleneck === true;
+        const statusBadge = isBottleneck
+          ? `<div style="display:inline-block;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:700;margin:3px 0;">⚠️ AI Siltation Choke Point · High Overtopping Probability</div>`
+          : `<div style="display:inline-block;background:#F0FDF4;color:#16A34A;border:1px solid #BBF7D0;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:700;margin:3px 0;">✓ Open Flow Artery</div>`;
+
+        new mapboxgl.Popup({ offset: 10, closeButton: true, className: "kenya-re-drain-popup" })
+          .setLngLat(e.lngLat)
+          .setHTML(`
+            <div style="font-family: system-ui, -apple-system, sans-serif; font-size: 12px; color: #1E293B; min-width: 220px; padding: 2px;">
+              <div style="font-weight: 700; color: #00264D; font-size: 13px; line-height: 1.25;">💧 ${p.name}</div>
+              <div style="color: #64748B; font-size: 11px; margin-top: 1px;">Type: <strong style="color: #0F172A;">${p.type_label}</strong></div>
+              ${statusBadge}
+              <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 6px; font-size: 11px; margin-top: 4px;">
+                <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
+                  <span style="color: #64748B;">Catchment:</span>
+                  <strong style="color: #0F172A;">${p.catchment}</strong>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
+                  <span style="color: #64748B;">Peak Discharge:</span>
+                  <strong style="color: #0284C7; font-family: monospace;">${p.capacity_m3s} m³/s</strong>
+                </div>
+                <div style="display:flex; justify-content:space-between;">
+                  <span style="color: #64748B;">Channel Width:</span>
+                  <strong style="color: #0F172A; font-family: monospace;">${p.width_m} m</strong>
+                </div>
+              </div>
+              <p style="color: #475569; font-size: 10.5px; margin-top: 5px; line-height: 1.35;">${p.description}</p>
+            </div>
+          `)
+          .addTo(m);
+      });
+
+      m.on("mouseenter", "drainage-lines-main", () => {
+        m.getCanvas().style.cursor = "pointer";
+      });
+      m.on("mouseleave", "drainage-lines-main", () => {
         m.getCanvas().style.cursor = "";
       });
     }
@@ -452,7 +666,7 @@ export function RiskMap({
       <div ref={mapContainer} className="h-full w-full" />
 
       {/* 3D Floating Control Ribbon (Top-Left of map) */}
-      <div className="absolute top-3 left-3 z-10 flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-200/90 bg-white/95 p-1 shadow-md backdrop-blur">
+      <div className="absolute top-3 left-3 z-10 flex flex-wrap items-center gap-1.5 max-w-[calc(100%-24px)] rounded-lg border border-slate-200/90 bg-white/95 p-1 shadow-md backdrop-blur">
         {/* 3D Tilt Button */}
         <button
           onClick={toggle3DTilt}
@@ -464,6 +678,19 @@ export function RiskMap({
           title="Toggle 3D Perspective Tilt"
         >
           <Compass className="size-3.5" /> {is3D ? "3D Perspective" : "2D Flat"}
+        </button>
+
+        {/* Drainage Network Toggle */}
+        <button
+          onClick={() => setShowDrains(!showDrains)}
+          className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold transition cursor-pointer ${
+            showDrains
+              ? "bg-[#0ea5e9] text-white shadow-xs"
+              : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+          }`}
+          title="Toggle Urban Stormwater Drains & Canals"
+        >
+          <Waves className="size-3.5" /> Drains: {showDrains ? "ON" : "OFF"}
         </button>
 
         {/* Style Selector */}
