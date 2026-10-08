@@ -10,7 +10,7 @@ import { useRouter } from "next/navigation";
 export default function ConsolePage() {
   const router = useRouter();
   useEffect(() => {
-    router.push("/dashboard");
+    router.push("/console/data");
   }, [router]);
   return null;
 }

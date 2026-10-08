@@ -372,25 +372,28 @@ export default function DashboardPage() {
                 Risk Platform Tools
               </div>
               <Link
-                href="/console/quotes"
-                onClick={() => setSidebarOpen(false)}
-                className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100"
-              >
-                Facultative Underwriter
-              </Link>
-              <Link
                 href="/console/data"
                 onClick={() => setSidebarOpen(false)}
-                className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100"
+                className="flex items-center justify-between rounded-lg px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
               >
-                Exposure Data & Slip Parser
+                <span>1. Data Ingestion</span>
+                <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold">Step 1</span>
+              </Link>
+              <Link
+                href="/console/quotes"
+                onClick={() => setSidebarOpen(false)}
+                className="flex items-center justify-between rounded-lg px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
+              >
+                <span>4. Facultative Quotes</span>
+                <span className="text-[10px] bg-red-100 text-red-800 px-1.5 py-0.5 rounded font-bold">PDF Slip</span>
               </Link>
               <Link
                 href="/console/reports"
                 onClick={() => setSidebarOpen(false)}
-                className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100"
+                className="flex items-center justify-between rounded-lg px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
               >
-                Executive Risk Dossiers
+                <span>Executive Dossiers</span>
+                <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-bold">PDF</span>
               </Link>
             </div>
           </nav>

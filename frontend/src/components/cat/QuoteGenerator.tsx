@@ -3,10 +3,10 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Calculator, Download, CheckCircle2, Loader2 } from "lucide-react";
+import { Calculator, Download, CheckCircle2, Loader2, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { api, formatKES, type HousingClass, type FacultativeResponse } from "@/lib/api";
+import { exportQuoteSlipPDF } from "@/lib/pdfGenerator";
 
 const NAIROBI_LOCALITIES: Record<string, [number, number]> = {
   "upper hill": [-1.2995, 36.8152],
@@ -32,6 +32,7 @@ export function QuoteGenerator() {
   });
   const [quote, setQuote] = useState<FacultativeResponse | null>(null);
   const [isCalculating, setIsCalculating] = useState(false);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
   const handleCalculate = async () => {
     if (!propertyData.location || !propertyData.housingClass || !propertyData.floorArea || !propertyData.costPerM2) {
@@ -215,31 +216,39 @@ export function QuoteGenerator() {
             </div>
           </div>
 
-          <div className="flex gap-2 pt-2">
+          <div className="flex flex-col sm:flex-row gap-2 pt-2">
             <Button
-              variant="outline"
-              className="flex-1 gap-2"
-              onClick={() => {
-                const text = `KENYA REINSURANCE CORPORATION — FACULTATIVE QUOTE SLIP\n\nLocality: ${propertyData.location} (${quote.lat}, ${quote.lon})\nConstruction: ${quote.housing_class}\nTotal Insured Value: KES ${quote.tiv_kes.toLocaleString()}\n\nACTUARIAL RESULTS:\n- 100-Year Modeled Flood Depth: ${quote.depth_100y_m.toFixed(2)} m\n- Asset Pure AAL: KES ${quote.asset_aal_gross_kes.toLocaleString()} / year\n- Policy Deductible (${quote.deductible_pct}%): KES ${quote.deductible_kes.toLocaleString()}\n- Recommended Technical Rate: ${quote.recommended_technical_rate_pct}%\n- Annual Flood Premium: KES ${quote.recommended_annual_premium_kes.toLocaleString()}\n\nCalculated by Kenya Re Catastrophe Risk Intelligence Platform`;
-                const blob = new Blob([text], { type: "text/plain" });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = `kenya-re-quote-${Date.now()}.txt`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-                toast.success("Quote slip downloaded!");
+              className="flex-1 gap-2 bg-[#00264D] hover:bg-[#001830] text-white cursor-pointer"
+              disabled={isDownloadingPdf}
+              onClick={async () => {
+                try {
+                  setIsDownloadingPdf(true);
+                  await exportQuoteSlipPDF(quote, propertyData);
+                  toast.success("Kenya Re PDF Quote Slip generated and downloaded!");
+                } catch (err) {
+                  console.error(err);
+                  toast.error("Failed to generate PDF slip.");
+                } finally {
+                  setIsDownloadingPdf(false);
+                }
               }}
             >
-              <Download className="size-4" />
-              Download Slip
+              {isDownloadingPdf ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Generating PDF Slip...
+                </>
+              ) : (
+                <>
+                  <Download className="size-4" />
+                  Download Official PDF Quote Slip
+                </>
+              )}
             </Button>
             <Button
               onClick={() => setQuote(null)}
               variant="outline"
-              className="flex-1"
+              className="sm:w-28 cursor-pointer"
             >
               Reset
             </Button>

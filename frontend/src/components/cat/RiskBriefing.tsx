@@ -6,6 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Sparkles, Loader2, FileText, Download, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, type RP, type BriefingResponse } from "@/lib/api";
+import { exportRiskBriefingPDF } from "@/lib/pdfGenerator";
 
 export function RiskBriefing({
   scenario = "100y",
@@ -40,40 +41,20 @@ export function RiskBriefing({
     }
   };
 
-  const handleDownload = () => {
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+
+  const handleDownload = async () => {
     if (!briefing) return;
-
-    const markdown = `# KENYA REINSURANCE CORPORATION — CATASTROPHE RISK BRIEFING
-**Peril:** Nairobi Urban Pluvial Surface-Water Flood
-**Scenario:** 1-in-${scenario.replace("y", "")} Year Event
-**Date:** ${new Date().toLocaleDateString()}
-
----
-
-## 1. Executive Summary
-${briefing.executive_summary}
-
-## 2. Key Underwriting Findings
-${briefing.key_findings.map((f, i) => `${i + 1}. ${f}`).join("\n")}
-
-## 3. Recommended Actions & Treaty Guidance
-${briefing.recommendations.map((r, i) => `${i + 1}. ${r}`).join("\n")}
-
----
-*${briefing.disclaimer}*
-`;
-
-    const blob = new Blob([markdown], { type: "text/markdown" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `kenya-re-risk-briefing-${scenario}-${Date.now()}.md`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-
-    toast.success("Briefing memorandum downloaded!");
+    try {
+      setIsDownloadingPdf(true);
+      await exportRiskBriefingPDF(briefing, scenario);
+      toast.success("Kenya Re Executive Memorandum PDF downloaded!");
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to generate PDF memorandum.");
+    } finally {
+      setIsDownloadingPdf(false);
+    }
   };
 
   return (
@@ -115,13 +96,22 @@ ${briefing.recommendations.map((r, i) => `${i + 1}. ${r}`).join("\n")}
                 <span className="font-semibold text-slate-900 text-sm sm:text-base">Executive Memorandum ({scenario})</span>
               </div>
               <Button
-                variant="outline"
                 size="sm"
                 onClick={handleDownload}
-                className="gap-2 w-full sm:w-auto"
+                disabled={isDownloadingPdf}
+                className="gap-2 w-full sm:w-auto bg-[#00264D] hover:bg-[#001830] text-white cursor-pointer"
               >
-                <Download className="size-4" />
-                Download Markdown
+                {isDownloadingPdf ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" />
+                    Generating PDF...
+                  </>
+                ) : (
+                  <>
+                    <Download className="size-4" />
+                    Download Official PDF Memorandum
+                  </>
+                )}
               </Button>
             </div>
 
