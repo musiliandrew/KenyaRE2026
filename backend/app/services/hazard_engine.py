@@ -231,3 +231,4 @@ class HazardEngine:
 
 # Global singleton instance for high-speed API re-use
 hazard_engine = HazardEngine()
+

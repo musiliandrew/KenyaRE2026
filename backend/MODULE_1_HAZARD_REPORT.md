@@ -88,3 +88,4 @@ With the hazard depth outputs calibrated and verified, the pipeline transitions 
    - `permanent_masonry` (90% cap)
    - `concrete_rcc` (65% cap)
 3. Connect Module 2 to the Hazard Engine depths to calculate asset-level damage ratios.
+

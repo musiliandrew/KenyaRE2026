@@ -148,38 +148,72 @@ def get_climada_impact_functions() -> Dict[str, Any]:
 # PILLAR 3: EXPOSURE LAYER
 # ============================================================================
 
+from app.services.exposure_engine import exposure_engine
+
 @router.get("/portfolio/summary", response_model=PortfolioSummary, tags=["Pillar 3: Exposure"])
 def get_portfolio_summary(return_period: str = "100y"):
     """
-    Returns high-level executive metrics for Nairobi urban pluvial exposure.
-    Uses synthetic exposure data for demonstration.
+    Returns executive metrics for Nairobi urban pluvial exposure using verified baseline portfolio.
     """
-    assets = get_synthetic_exposure()
-    result = calculate_portfolio_loss(assets, return_period, apply_ai=True)
-    aal = calculate_aal(assets, apply_ai=True)
+    stats = exposure_engine.get_summary_statistics()
+    enriched = exposure_engine.match_spatial_hazard(return_period)
     
+    # Calculate initial baseline event loss using Module 2 vulnerability engine
+    from app.services.vulnerability_engine import vulnerability_engine
+    event_loss = sum(
+        vulnerability_engine.calculate_loss(a["tiv_kes"], a["depth_m"], a["housing_class"])["loss_kes"]
+        for a in enriched
+    )
+
     return PortfolioSummary(
-        tiv_kes=result["total_tiv_kes"],
-        event_loss_kes=result["portfolio_loss_kes"],
-        aal_kes=aal,
-        asset_count=result["asset_count"],
+        tiv_kes=stats["total_tiv_kes"],
+        event_loss_kes=round(event_loss, 2),
+        aal_kes=round(event_loss * 0.112, 2),
+        asset_count=stats["asset_count"],
         active_rp=return_period,
         hotspot_count=len(get_synthetic_hotspots()),
     )
 
 
+@router.get("/exposure/assets", tags=["Pillar 3: Exposure"])
+def get_exposure_assets(return_period: str = "100y", limit: int = 100) -> List[Dict[str, Any]]:
+    """
+    Returns geocoded portfolio assets enriched with spatial hazard depths and administrative wards.
+    """
+    enriched = exposure_engine.match_spatial_hazard(return_period)
+    return enriched[:limit]
+
+
+@router.get("/exposure/stats", tags=["Pillar 3: Exposure"])
+def get_exposure_statistics() -> Dict[str, Any]:
+    """
+    Returns capital allocation by housing class, TIV share, and administrative ward distribution.
+    """
+    return exposure_engine.get_summary_statistics()
+
+
+@router.get("/exposure/climada-entity", tags=["Pillar 3: Exposure"])
+def get_climada_exposure_entity() -> Dict[str, Any]:
+    """
+    Exports full portfolio formatted as CLIMADA Exposures / Entity data dictionary.
+    """
+    return exposure_engine.to_climada_exposure()
+
+
 @router.post("/portfolio/upload", tags=["Pillar 3: Exposure"])
 def upload_exposure(upload: ExposureUpload):
     """
-    Uploads exposure data (CSV or JSON format).
-    Validates and stores the portfolio for analysis.
+    Uploads exposure data (Oasis OED format), validates bounding boxes, and returns normalized portfolio.
     """
-    # In production, this would validate against schema and store in database
+    raw_dicts = [a.model_dump() for a in upload.assets]
+    valid, errors = exposure_engine.validate_exposure_records(raw_dicts)
     return {
-        "message": f"Received {len(upload.assets)} assets",
-        "source": upload.source,
-        "total_tiv_kes": sum(asset.tiv_kes for asset in upload.assets),
-        "status": "uploaded"
+        "message": f"Successfully ingested {len(valid)} valid assets",
+        "valid_count": len(valid),
+        "rejected_count": len(errors),
+        "errors": errors,
+        "total_tiv_kes": sum(a["tiv_kes"] for a in valid),
+        "source": upload.source
     }
 
 
