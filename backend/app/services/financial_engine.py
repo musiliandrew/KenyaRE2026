@@ -330,3 +330,4 @@ class FinancialEngine:
 
 # Global singleton instance for high-speed API re-use
 financial_engine = FinancialEngine()
+

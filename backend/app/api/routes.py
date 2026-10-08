@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
-from typing import List, Dict, Any
+from fastapi.responses import StreamingResponse
+from typing import List, Dict, Any, Optional
 from app.models.schemas import (
     PortfolioSummary, ReturnPeriodMetric, EPCurveResponse,
     HazardLookupRequest, HazardLookupResponse,
@@ -9,7 +10,8 @@ from app.models.schemas import (
     BriefingRequest, BriefingResponse,
     ExposureUpload, ExposureAsset,
     XoLTreatyRequest, XoLTreatyResponse,
-    FacultativeQuoteRequest, FacultativeQuoteResponse
+    FacultativeQuoteRequest, FacultativeQuoteResponse,
+    AIChatRequest
 )
 from app.services.financial_engine import financial_engine
 from app.services.cat_engine import (
@@ -18,7 +20,7 @@ from app.services.cat_engine import (
     lookup_hazard_score, apply_ai_drainage_adjustments,
     RP_DEPTH_ANCHORS, RP_LABELS
 )
-from app.services.ai_service import parse_natural_language_portfolio, generate_risk_briefing
+from app.services.ai_service import parse_natural_language_portfolio, generate_risk_briefing, stream_ai_chat
 from app.services.synthetic_data import get_synthetic_exposure, get_synthetic_hotspots
 
 router = APIRouter()
@@ -407,3 +409,16 @@ def generate_briefing(req: BriefingRequest):
     )
     
     return BriefingResponse(**result)
+
+
+@router.post("/ai/chat/stream", tags=["AI Intelligence Layer"])
+def chat_stream(req: AIChatRequest):
+    """
+    Streams interactive AI Copilot responses token-by-token using Groq (openai/gpt-oss-120b).
+    """
+    def event_generator():
+        for token in stream_ai_chat(req.message, req.history):
+            yield token
+
+    return StreamingResponse(event_generator(), media_type="text/plain")
+

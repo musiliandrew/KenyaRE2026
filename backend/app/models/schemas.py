@@ -195,3 +195,9 @@ class FacultativeQuoteResponse(BaseModel):
     depth_100y_m: float
     insured_loss_100y_kes: float
 
+
+class AIChatRequest(BaseModel):
+    message: str = Field(..., description="User query or underwriter prompt")
+    history: Optional[List[Dict[str, str]]] = Field(default=None, description="Previous chat conversation history")
+
+

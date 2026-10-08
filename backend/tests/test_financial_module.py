@@ -108,3 +108,4 @@ def run_financial_module_tests():
 
 if __name__ == "__main__":
     run_financial_module_tests()
+

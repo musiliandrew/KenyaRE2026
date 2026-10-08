@@ -116,3 +116,4 @@ All test suites and FastAPI `TestClient` integrations passed with 100% complianc
 - `POST /api/reinsurance/xol`: Pricing engine for Excess of Loss Reinsurance treaties.
 - `POST /api/quotes/facultative`: Technical underwriting quotation for single policy slips.
 - `POST /api/model/run`: Full scenario catastrophe run with AI delta and damage breakdown.
+
