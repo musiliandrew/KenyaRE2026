@@ -13,7 +13,13 @@ import {
   type RP,
 } from "@/lib/api";
 import { Layers, Compass, Eye, Sparkles, Waves } from "lucide-react";
-import { NAIROBI_DRAINAGE_GEOJSON } from "@/lib/drainageData";
+import {
+  NAIROBI_DRAINAGE_GEOJSON,
+  NAIROBI_DRAINAGE_RIBBONS_GEOJSON,
+  NAIROBI_SURGE_TOWERS_GEOJSON,
+  calculateCorridorExposure,
+  lineStringToRibbonPolygon,
+} from "@/lib/drainageData";
 
 const MAPBOX_TOKEN =
   process.env.NEXT_PUBLIC_MAPBOX_TOKEN ||
@@ -49,6 +55,12 @@ export function RiskMap({
   const [mapLoaded, setMapLoaded] = useState(false);
   const [is3D, setIs3D] = useState(true);
   const [showDrains, setShowDrains] = useState(true);
+  const [activeCorridor, setActiveCorridor] = useState<{
+    id: string;
+    name: string;
+    exposedCount: number;
+    totalTivKes: number;
+  } | null>(null);
   const [mapStyle, setMapStyle] = useState<"light" | "dark" | "satellite">("light");
 
   const [assets, setAssets] = useState<ExposureAsset[]>(propAssets || []);
@@ -96,6 +108,52 @@ export function RiskMap({
       api.hazardHotspots(normRP).then((res) => setHotspots(res)).catch(() => {});
     }
   }, [propHotspots, normRP]);
+
+  // Animated downstream water currents along channels
+  useEffect(() => {
+    if (!map.current || !mapLoaded || !showDrains) return;
+
+    const m = map.current;
+    let animId: number;
+    let step = 0;
+    const dashPhases = [
+      [0, 4, 3],
+      [0.5, 4, 2.5],
+      [1, 4, 2],
+      [1.5, 4, 1.5],
+      [2, 4, 1],
+      [2.5, 4, 0.5],
+      [3, 4, 0],
+      [0, 0.5, 3, 3.5],
+      [0, 1, 3, 3],
+      [0, 1.5, 3, 2.5],
+      [0, 2, 3, 2],
+      [0, 2.5, 3, 1.5],
+      [0, 3, 3, 1],
+      [0, 3.5, 3, 0.5],
+    ];
+
+    let lastTime = 0;
+    const animate = (timestamp: number) => {
+      if (timestamp - lastTime > 65) {
+        lastTime = timestamp;
+        step = (step + 1) % dashPhases.length;
+        if (m.getLayer("drainage-flow-animated")) {
+          try {
+            m.setPaintProperty("drainage-flow-animated", "line-dasharray", dashPhases[step]);
+          } catch {
+            // style reloaded or layer unmounted
+          }
+        }
+      }
+      animId = requestAnimationFrame(animate);
+    };
+
+    animId = requestAnimationFrame(animate);
+    return () => {
+      cancelAnimationFrame(animId);
+    };
+  }, [mapLoaded, showDrains]);
 
   const styleUrls = {
     light: "mapbox://styles/mapbox/light-v11",
@@ -528,7 +586,64 @@ export function RiskMap({
       });
     }
 
-    // --- DRAINAGE & STORMWATER NETWORK GEOJSON ---
+    // --- 1. DRAINAGE & STORMWATER 3D VOLUMETRIC RIBBONS ---
+    const ribbonSourceData = showDrains
+      ? NAIROBI_DRAINAGE_RIBBONS_GEOJSON
+      : { type: "FeatureCollection", features: [] };
+
+    if (m.getSource("drainage-ribbons-source")) {
+      (m.getSource("drainage-ribbons-source") as mapboxgl.GeoJSONSource).setData(ribbonSourceData as any);
+    } else {
+      m.addSource("drainage-ribbons-source", {
+        type: "geojson",
+        data: ribbonSourceData as any,
+      });
+
+      // 3D Extruded Water Ribbon (Canal Trench / Elevated Water Surface)
+      m.addLayer({
+        id: "drainage-ribbons-3d",
+        type: "fill-extrusion",
+        source: "drainage-ribbons-source",
+        paint: {
+          "fill-extrusion-height": ["get", "extrusion_height"],
+          "fill-extrusion-base": 0,
+          "fill-extrusion-color": ["get", "color"],
+          "fill-extrusion-opacity": 0.82,
+        },
+      });
+    }
+
+    // --- 2. 150m CORRIDOR EXPOSURE BUFFER HIGHLIGHT ---
+    if (!m.getSource("drainage-corridor-buffer-source")) {
+      m.addSource("drainage-corridor-buffer-source", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+
+      m.addLayer({
+        id: "drainage-corridor-buffer-fill",
+        type: "fill",
+        source: "drainage-corridor-buffer-source",
+        paint: {
+          "fill-color": "#38bdf8",
+          "fill-opacity": 0.22,
+        },
+      });
+
+      m.addLayer({
+        id: "drainage-corridor-buffer-stroke",
+        type: "line",
+        source: "drainage-corridor-buffer-source",
+        paint: {
+          "line-color": "#0284c7",
+          "line-width": 1.8,
+          "line-dasharray": [3, 2],
+          "line-opacity": 0.85,
+        },
+      });
+    }
+
+    // --- 3. DRAINAGE VECTOR LINES & ANIMATED FLOW CURRENTS ---
     const drainageSourceData = showDrains
       ? NAIROBI_DRAINAGE_GEOJSON
       : { type: "FeatureCollection", features: [] };
@@ -541,7 +656,7 @@ export function RiskMap({
         data: drainageSourceData as any,
       });
 
-      // 1. Soft Outer Glow Layer for Waterways
+      // Outer Glow Line for Waterways
       m.addLayer({
         id: "drainage-lines-glow",
         type: "line",
@@ -562,13 +677,13 @@ export function RiskMap({
             ["linear"],
             ["zoom"],
             11, 4,
-            16, 9,
+            16, 10,
           ],
-          "line-opacity": 0.32,
+          "line-opacity": 0.35,
         },
       });
 
-      // 2. High-Contrast Crisp Vector Line
+      // Crisp Centerline
       m.addLayer({
         id: "drainage-lines-main",
         type: "line",
@@ -589,57 +704,293 @@ export function RiskMap({
             ["linear"],
             ["zoom"],
             11, 2.0,
-            16, 4.2,
+            16, 4.5,
           ],
           "line-opacity": 0.95,
         },
       });
 
-      // Interactive Click Popup on Drainage Channel
-      m.on("click", "drainage-lines-main", (e) => {
+      // Animated Downstream Water Current (Pulsing Photons traveling along flow gradient)
+      m.addLayer({
+        id: "drainage-flow-animated",
+        type: "line",
+        source: "drainage-source",
+        layout: {
+          "line-join": "round",
+          "line-cap": "round",
+        },
+        paint: {
+          "line-color": [
+            "case",
+            ["==", ["get", "ai_bottleneck"], true],
+            "#fef08a",
+            "#e0f2fe",
+          ],
+          "line-width": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            11, 1.8,
+            16, 3.5,
+          ],
+          "line-dasharray": [0, 4, 3],
+          "line-opacity": 0.95,
+        },
+      });
+    }
+
+    // --- 4. 3D BOTTLENECK SURGE TOWERS (HYDRAULIC CHOKE POINTS) ---
+    const surgeSourceData = showDrains
+      ? NAIROBI_SURGE_TOWERS_GEOJSON
+      : { type: "FeatureCollection", features: [] };
+
+    if (m.getSource("drainage-surge-towers-source")) {
+      (m.getSource("drainage-surge-towers-source") as mapboxgl.GeoJSONSource).setData(surgeSourceData as any);
+    } else {
+      m.addSource("drainage-surge-towers-source", {
+        type: "geojson",
+        data: surgeSourceData as any,
+      });
+
+      // 3D Volumetric Surge Tower (Rising 35m–48m into 3D Skyline)
+      m.addLayer({
+        id: "drainage-surge-towers-3d",
+        type: "fill-extrusion",
+        source: "drainage-surge-towers-source",
+        paint: {
+          "fill-extrusion-height": ["get", "tower_height"],
+          "fill-extrusion-base": 0,
+          "fill-extrusion-color": ["get", "color"],
+          "fill-extrusion-opacity": 0.72,
+        },
+      });
+
+      // Ground Beacon Pulsing Ring
+      m.addLayer({
+        id: "drainage-surge-towers-ring",
+        type: "circle",
+        source: "drainage-surge-towers-source",
+        paint: {
+          "circle-radius": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            11, 8,
+            15, 18,
+          ],
+          "circle-color": ["get", "color"],
+          "circle-opacity": 0.25,
+          "circle-stroke-width": 2,
+          "circle-stroke-color": ["get", "color"],
+        },
+      });
+
+      // Center Dot
+      m.addLayer({
+        id: "drainage-surge-towers-dot",
+        type: "circle",
+        source: "drainage-surge-towers-source",
+        paint: {
+          "circle-radius": 4.5,
+          "circle-color": "#ffffff",
+          "circle-stroke-width": 2,
+          "circle-stroke-color": ["get", "color"],
+        },
+      });
+
+      // Click Event on 3D Surge Tower
+      m.on("click", "drainage-surge-towers-ring", (e) => {
         if (!e.features || !e.features[0]) return;
         const p = e.features[0].properties as any;
         if (!p) return;
 
-        const isBottleneck = p.ai_bottleneck === "true" || p.ai_bottleneck === true;
-        const statusBadge = isBottleneck
-          ? `<div style="display:inline-block;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:700;margin:3px 0;">⚠️ AI Siltation Choke Point · High Overtopping Probability</div>`
-          : `<div style="display:inline-block;background:#F0FDF4;color:#16A34A;border:1px solid #BBF7D0;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:700;margin:3px 0;">✓ Open Flow Artery</div>`;
+        m.flyTo({
+          center: [Number(p.lng), Number(p.lat)],
+          zoom: 15.2,
+          pitch: 62,
+          bearing: -24,
+          duration: 1800,
+          essential: true,
+        });
 
-        new mapboxgl.Popup({ offset: 10, closeButton: true, className: "kenya-re-drain-popup" })
+        new mapboxgl.Popup({ offset: 14, closeButton: true, className: "kenya-re-tower-popup", maxWidth: "340px" })
           .setLngLat(e.lngLat)
           .setHTML(`
-            <div style="font-family: system-ui, -apple-system, sans-serif; font-size: 12px; color: #1E293B; min-width: 220px; padding: 2px;">
-              <div style="font-weight: 700; color: #00264D; font-size: 13px; line-height: 1.25;">💧 ${p.name}</div>
-              <div style="color: #64748B; font-size: 11px; margin-top: 1px;">Type: <strong style="color: #0F172A;">${p.type_label}</strong></div>
-              ${statusBadge}
-              <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 6px; font-size: 11px; margin-top: 4px;">
-                <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
-                  <span style="color: #64748B;">Catchment:</span>
-                  <strong style="color: #0F172A;">${p.catchment}</strong>
+            <div style="font-family: system-ui, -apple-system, sans-serif; font-size: 12px; color: #1E293B; min-width: 250px; padding: 2px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
+                <span style="background:#FEE2E2;color:#DC2626;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;">⚠️ 3D SURGE TOWER</span>
+                <span style="font-size:10px;color:#64748B;font-family:monospace;font-weight:700;">${p.tower_height}m Elevation</span>
+              </div>
+              <div style="font-weight: 700; color: #00264D; font-size: 13px; margin-top: 4px; line-height: 1.25;">${p.name}</div>
+              <div style="color: #64748B; font-size: 11px; margin-top: 1px;">Basin: <strong style="color: #0F172A;">${p.catchment}</strong></div>
+
+              <div style="background: #FEF2F2; border: 1px solid #FECACA; border-radius: 6px; padding: 7px; margin-top: 6px; font-size: 11px;">
+                <div style="display:flex; justify-content:space-between; margin-bottom: 3px;">
+                  <span style="color: #7F1D1D;">Siltation Capacity Loss:</span>
+                  <strong style="color: #DC2626; font-family: monospace;">${p.siltation_loss_pct}% Clogged</strong>
                 </div>
-                <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
-                  <span style="color: #64748B;">Peak Discharge:</span>
-                  <strong style="color: #0284C7; font-family: monospace;">${p.capacity_m3s} m³/s</strong>
+                <div style="display:flex; justify-content:space-between; margin-bottom: 3px;">
+                  <span style="color: #7F1D1D;">Backwater Surge Head:</span>
+                  <strong style="color: #DC2626; font-family: monospace;">+${p.surge_head_m}m</strong>
                 </div>
                 <div style="display:flex; justify-content:space-between;">
-                  <span style="color: #64748B;">Channel Width:</span>
-                  <strong style="color: #0F172A; font-family: monospace;">${p.width_m} m</strong>
+                  <span style="color: #7F1D1D;">Overtopping Risk:</span>
+                  <strong style="color: #B91C1C;">${p.overtopping_prob}</strong>
                 </div>
               </div>
-              <p style="color: #475569; font-size: 10.5px; margin-top: 5px; line-height: 1.35;">${p.description}</p>
+
+              <p style="color: #475569; font-size: 10.5px; margin-top: 6px; line-height: 1.35;">${p.description}</p>
             </div>
           `)
           .addTo(m);
       });
 
-      m.on("mouseenter", "drainage-lines-main", () => {
+      m.on("mouseenter", "drainage-surge-towers-ring", () => {
         m.getCanvas().style.cursor = "pointer";
       });
-      m.on("mouseleave", "drainage-lines-main", () => {
+      m.on("mouseleave", "drainage-surge-towers-ring", () => {
         m.getCanvas().style.cursor = "";
       });
     }
+
+    // --- 5. INTERACTIVE 3D CORRIDOR FLY-ALONG & 150m EXPOSURE SCAN ---
+    const handleDrainageFeatureClick = (e: mapboxgl.MapLayerMouseEvent) => {
+      if (!e.features || !e.features[0]) return;
+      const feat = e.features[0];
+      const p = feat.properties as any;
+      if (!p) return;
+
+      // Find original full geometry coordinates
+      const originalFeature = NAIROBI_DRAINAGE_GEOJSON.features.find(
+        (f) => f.id === p.id || f.properties.name === p.name
+      );
+      const coords = originalFeature?.geometry.coordinates || [];
+      if (coords.length < 2) return;
+
+      // Calculate 150m corridor exposure scan
+      const exposure = calculateCorridorExposure(coords, assets, 150);
+
+      setActiveCorridor({
+        id: p.id,
+        name: p.name,
+        exposedCount: exposure.exposedCount,
+        totalTivKes: exposure.totalTivKes,
+      });
+
+      // Highlight 150m corridor buffer polygon
+      const bufferRing = lineStringToRibbonPolygon(coords, 300);
+      if (m.getSource("drainage-corridor-buffer-source")) {
+        (m.getSource("drainage-corridor-buffer-source") as mapboxgl.GeoJSONSource).setData({
+          type: "FeatureCollection",
+          features: [
+            {
+              type: "Feature",
+              geometry: {
+                type: "Polygon",
+                coordinates: [bufferRing],
+              },
+              properties: {},
+            },
+          ],
+        });
+      }
+
+      // Calculate midpoint & channel heading for cinematic 3D fly-along
+      const midIdx = Math.floor(coords.length / 2);
+      const midLng = coords[midIdx][0];
+      const midLat = coords[midIdx][1];
+      const p1 = coords[Math.max(0, midIdx - 1)];
+      const p2 = coords[Math.min(coords.length - 1, midIdx + 1)];
+      const bearing = Math.round((Math.atan2(p2[0] - p1[0], p2[1] - p1[1]) * 180) / Math.PI);
+
+      m.flyTo({
+        center: [midLng, midLat],
+        zoom: 14.6,
+        pitch: 62,
+        bearing: bearing,
+        duration: 2000,
+        essential: true,
+      });
+
+      // Render rich popup with exposure scan results
+      const isBottleneck = p.ai_bottleneck === "true" || p.ai_bottleneck === true;
+      const statusBadge = isBottleneck
+        ? `<div style="display:inline-block;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:700;margin:3px 0;">⚠️ AI Siltation Bottleneck · High Overtopping Probability</div>`
+        : `<div style="display:inline-block;background:#F0FDF4;color:#16A34A;border:1px solid #BBF7D0;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:700;margin:3px 0;">✓ Open Flow Artery</div>`;
+
+      const exposedAssetsList = exposure.exposedAssets.slice(0, 3).map((a: any) =>
+        `<li style="margin-top:2px;display:flex;justify-content:space-between;gap:8px;">
+          <span style="max-width:145px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#1E293B;">${a.name || a.ward} (${a.loc_id})</span>
+          <span style="font-family:monospace;font-weight:600;color:#00264D;">${formatKES(a.tiv_kes)}</span>
+        </li>`
+      ).join("");
+
+      new mapboxgl.Popup({ offset: 12, closeButton: true, className: "kenya-re-drain-popup", maxWidth: "340px" })
+        .setLngLat(e.lngLat)
+        .setHTML(`
+          <div style="font-family: system-ui, -apple-system, sans-serif; font-size: 12px; color: #1E293B; min-width: 250px; padding: 2px;">
+            <div style="font-weight: 700; color: #00264D; font-size: 13px; line-height: 1.25;">🌊 ${p.name}</div>
+            <div style="color: #64748B; font-size: 11px; margin-top: 1px;">Type: <strong style="color: #0F172A;">${p.type_label}</strong> · Physical Width: <strong style="color: #0284c7;">${p.width_m}m</strong></div>
+            ${statusBadge}
+            
+            <!-- 150m Hydrological Proximity Scan -->
+            <div style="background: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 6px; padding: 7px; margin-top: 6px;">
+              <div style="font-size: 10px; font-weight: 700; color: #1E40AF; text-transform: uppercase; letter-spacing: 0.5px;">⚡ 150m Corridor Exposure Scan</div>
+              <div style="display:flex; justify-content:space-between; margin-top: 4px; font-size: 11px;">
+                <span style="color: #475569;">Insured Assets in Corridor:</span>
+                <strong style="color: ${exposure.exposedCount > 0 ? '#DC2626' : '#16A34A'};">${exposure.exposedCount} Properties</strong>
+              </div>
+              <div style="display:flex; justify-content:space-between; margin-top: 2px; font-size: 11px;">
+                <span style="color: #475569;">Aggregate TIV at Risk:</span>
+                <strong style="color: #00264D; font-family: monospace;">${formatKES(exposure.totalTivKes)}</strong>
+              </div>
+              ${exposure.maxDepthM > 0 ? `
+                <div style="display:flex; justify-content:space-between; margin-top: 2px; font-size: 11px;">
+                  <span style="color: #475569;">Max Modeled Depth:</span>
+                  <strong style="color: #DC2626; font-family: monospace;">${exposure.maxDepthM.toFixed(2)}m</strong>
+                </div>
+              ` : ''}
+              ${exposedAssetsList ? `
+                <div style="margin-top: 5px; padding-top: 4px; border-top: 1px dashed #BFDBFE; font-size: 10px;">
+                  <ul style="padding-left:0;list-style:none;margin:0;">
+                    ${exposedAssetsList}
+                  </ul>
+                </div>
+              ` : ''}
+            </div>
+
+            <!-- Technical Hydraulic Metrics -->
+            <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 6px; font-size: 11px; margin-top: 6px;">
+              <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
+                <span style="color: #64748B;">Catchment Basin:</span>
+                <strong style="color: #0F172A;">${p.catchment}</strong>
+              </div>
+              <div style="display:flex; justify-content:space-between;">
+                <span style="color: #64748B;">Peak Discharge:</span>
+                <strong style="color: #0284C7; font-family: monospace;">${p.capacity_m3s} m³/s</strong>
+              </div>
+            </div>
+            <p style="color: #475569; font-size: 10px; margin-top: 5px; line-height: 1.35;">${p.description}</p>
+          </div>
+        `)
+        .addTo(m);
+    };
+
+    m.on("click", "drainage-ribbons-3d", handleDrainageFeatureClick);
+    m.on("mouseenter", "drainage-ribbons-3d", () => {
+      m.getCanvas().style.cursor = "pointer";
+    });
+    m.on("mouseleave", "drainage-ribbons-3d", () => {
+      m.getCanvas().style.cursor = "";
+    });
+
+    m.on("click", "drainage-lines-main", handleDrainageFeatureClick);
+    m.on("mouseenter", "drainage-lines-main", () => {
+      m.getCanvas().style.cursor = "pointer";
+    });
+    m.on("mouseleave", "drainage-lines-main", () => {
+      m.getCanvas().style.cursor = "";
+    });
   }
 
   return (
@@ -692,6 +1043,29 @@ export function RiskMap({
         >
           <Waves className="size-3.5" /> Drains: {showDrains ? "ON" : "OFF"}
         </button>
+
+        {/* Active Corridor Exposure Chip */}
+        {activeCorridor && (
+          <div className="flex items-center gap-1.5 bg-sky-50 border border-sky-200 text-sky-900 rounded-md px-2 py-1 text-xs font-medium shadow-2xs">
+            <span className="font-bold text-sky-950">🌊 {activeCorridor.name}:</span>
+            <span>{activeCorridor.exposedCount} assets ({formatKES(activeCorridor.totalTivKes)})</span>
+            <button
+              onClick={() => {
+                setActiveCorridor(null);
+                if (map.current?.getSource("drainage-corridor-buffer-source")) {
+                  (map.current.getSource("drainage-corridor-buffer-source") as mapboxgl.GeoJSONSource).setData({
+                    type: "FeatureCollection",
+                    features: [],
+                  });
+                }
+              }}
+              className="ml-1 text-sky-700 hover:text-red-600 font-bold cursor-pointer"
+              title="Clear corridor highlight"
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         {/* Style Selector */}
         <div className="flex items-center rounded-md border border-slate-200 bg-slate-50 p-0.5 text-[11px] font-medium text-slate-600">

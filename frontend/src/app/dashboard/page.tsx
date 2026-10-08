@@ -1175,13 +1175,13 @@ function HazardPanel({
             <span className="font-bold text-[#00264D] uppercase text-[10px] tracking-wider">Legend:</span>
             
             <div className="flex items-center gap-1.5 text-slate-700">
-              <span className="w-4 h-1 rounded-full bg-[#0ea5e9] inline-block shadow-2xs"></span>
-              <span>Open Drains & Rivers</span>
+              <span className="w-4 h-1.5 rounded-full bg-[#0ea5e9] inline-block shadow-2xs"></span>
+              <span>3D Water Ribbons & Flow Currents</span>
             </div>
 
             <div className="flex items-center gap-1.5 text-slate-700">
-              <span className="w-4 h-1 rounded-full bg-[#ef4444] inline-block shadow-2xs"></span>
-              <span>AI Clogging Bottlenecks</span>
+              <span className="w-2.5 h-3.5 rounded-xs bg-[#ef4444] border border-red-700 inline-block shadow-2xs"></span>
+              <span>3D Bottleneck Surge Towers</span>
             </div>
 
             <div className="flex items-center gap-1.5 text-slate-700">
@@ -1201,7 +1201,7 @@ function HazardPanel({
           </div>
 
           <div className="text-slate-500 font-medium text-[10px] flex items-center gap-1">
-            <span>💡 Click any drain line on the map to inspect capacity & clogging diagnosis</span>
+            <span>💡 Click any 3D channel or surge tower to fly along corridor & scan 150m portfolio exposure</span>
           </div>
         </div>
       </div>
@@ -1251,11 +1251,17 @@ function HazardPanel({
                 <div className="text-lg sm:text-xl font-bold font-mono text-slate-900">{formatKES(selectedBuilding.tiv_kes)}</div>
               </div>
               <div className="text-right">
-                <span className="text-xs font-bold text-red-600 block">
-                  Loss: {formatKES(selectedBuilding.loss_kes || 0)} ({((selectedBuilding.damage_ratio || 0) * 100).toFixed(1)}%)
-                </span>
+                {(selectedBuilding.loss_kes || 0) > 0 ? (
+                  <span className="text-xs font-bold text-red-600 block">
+                    Loss: {formatKES(selectedBuilding.loss_kes || 0)} ({((selectedBuilding.damage_ratio || 0) * 100).toFixed(1)}%)
+                  </span>
+                ) : (
+                  <span className="text-xs font-bold text-emerald-700 block">
+                    Loss: KES 0 (0.0% · Below {selectedBuilding.housing_class === "concrete_rcc" ? "0.30m" : "0.25m"} Threshold)
+                  </span>
+                )}
                 <div className="text-[11px] text-slate-600 font-mono">
-                  Water Depth: <strong className="text-red-700">{(selectedBuilding.depth_m || 0).toFixed(2)} m</strong>
+                  Water Depth: <strong className={(selectedBuilding.loss_kes || 0) > 0 ? "text-red-700" : "text-slate-800"}>{(selectedBuilding.depth_m || 0).toFixed(2)} m</strong>
                 </div>
               </div>
             </div>
