@@ -50,3 +50,4 @@ uvicorn app.main:app --reload --port 8000
 ```
 
 Interactive Swagger API Documentation: [http://localhost:8000/docs](http://localhost:8000/docs)
+

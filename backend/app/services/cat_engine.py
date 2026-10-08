@@ -51,3 +51,4 @@ def calculate_asset_loss(tiv_kes: float, depth_m: float, housing_class: str) -> 
         "damage_ratio": round(ratio, 4),
         "loss_kes": round(loss, 2)
     }
+

@@ -53,3 +53,4 @@ class NLPParseResponse(BaseModel):
     recommended_premium_kes: float
     technical_rate_pct: float
     summary: str
+

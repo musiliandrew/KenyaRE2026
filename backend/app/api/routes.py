@@ -66,3 +66,4 @@ def parse_slip(req: NLPParseRequest):
         technical_rate_pct=technical_rate,
         summary=f"Extracted policy slip for {housing} near Mathare. Calculated flood loading with technical rate of {technical_rate}%."
     )
+

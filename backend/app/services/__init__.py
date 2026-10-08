@@ -6,3 +6,4 @@ __all__ = [
     "calculate_asset_loss",
     "RP_DEPTH_ANCHORS",
 ]
+
