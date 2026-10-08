@@ -206,8 +206,11 @@ export const api = {
   // Exposure
   exposureAssets: (rp: RP, opts: { limit?: number; offset?: number; ward?: string; housing_class?: HousingClass } = {}, s?: AbortSignal) =>
     request<AssetsResponse>(`/exposure/assets${qs({ return_period: rp, limit: 1000, ...opts })}`, undefined, s),
+  assets: (limit = 600, s?: AbortSignal) =>
+    request<AssetsResponse>(`/exposure/assets${qs({ return_period: "25y", limit })}`, undefined, s),
   exposureStats: (s?: AbortSignal) => request<ExposureStats>("/exposure/stats", undefined, s),
   portfolioSummary: (rp: RP, s?: AbortSignal) => request<PortfolioSummary>(`/portfolio/summary${qs({ return_period: rp })}`, undefined, s),
+  summary: (rp: RP = "25y", s?: AbortSignal) => request<PortfolioSummary>(`/portfolio/summary${qs({ return_period: rp })}`, undefined, s),
   portfolioUpload: (assets: Record<string, unknown>[], source = "upload") =>
     request<{ message: string; valid_count: number; rejected_count: number; errors: string[]; total_tiv_kes: number }>(
       "/portfolio/upload", { method: "POST", body: JSON.stringify({ assets, source }) }),

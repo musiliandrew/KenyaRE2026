@@ -547,3 +547,4 @@ export async function exportExposurePortfolioPDF(
   drawFooter(doc, 1, 1);
   doc.save(`KenyaRe_Portfolio_Summary_${Date.now()}.pdf`);
 }
+

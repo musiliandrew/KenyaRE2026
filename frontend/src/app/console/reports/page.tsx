@@ -23,8 +23,8 @@ import { toast } from "sonner";
 export default function ReportsPage() {
   const router = useRouter();
   const { isAuthenticated } = useAuth();
-  const { data: summaryData } = useApi(() => api.summary());
-  const { data: assetsData } = useApi(() => api.assets(600));
+  const { data: summaryData } = useApi((signal) => api.summary("25y", signal), []);
+  const { data: assetsData } = useApi((signal) => api.assets(600, signal), []);
   const [isExportingPortfolioPdf, setIsExportingPortfolioPdf] = useState(false);
 
   useEffect(() => {

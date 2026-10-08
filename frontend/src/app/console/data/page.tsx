@@ -30,8 +30,8 @@ import { toast } from "sonner";
 export default function DataPage() {
   const router = useRouter();
   const { isAuthenticated } = useAuth();
-  const { data: assetsData, isLoading: assetsLoading, refetch: refetchAssets } = useApi(() => api.assets(600));
-  const { data: summaryData } = useApi(() => api.summary());
+  const { data: assetsData, loading: assetsLoading, refetch: refetchAssets } = useApi((signal) => api.assets(600, signal), []);
+  const { data: summaryData } = useApi((signal) => api.summary("25y", signal), []);
 
   // Ingestion Mode: "baseline" | "ai-slip" | "single-form"
   const [ingestionMode, setIngestionMode] = useState<"baseline" | "ai-slip" | "single-form">("baseline");
