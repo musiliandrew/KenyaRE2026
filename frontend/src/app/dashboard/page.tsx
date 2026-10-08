@@ -23,6 +23,7 @@ import {
   LogOut,
   RefreshCw,
   Sparkles,
+  FileText
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AnimatedNumber } from "@/components/cat/AnimatedNumber";
@@ -85,6 +86,8 @@ const sidebarItems = [
   { id: "loss" as PanelType, label: "Loss & EP", icon: BarChart3 },
   { id: "ai" as PanelType, label: "AI Insights", icon: Cpu },
   { id: "assumptions" as PanelType, label: "Data & Assumptions", icon: Database },
+    { id: "Reports" as PanelType, label: "Reports", icon: FileText },
+
 ];
 
 export default function DashboardPage() {
@@ -217,51 +220,8 @@ export default function DashboardPage() {
             </Button>
           </div>
 
-          {/* Right: Actions, User & Drawer Toggle */}
-          <div className="flex items-center gap-1 sm:gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setActivePanel("ai")}
-              className="hidden lg:inline-flex text-xs"
-            >
-              <Cpu className="mr-1.5 size-3.5" />
-              AI Briefing
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                const csvData = "data:text/csv;charset=utf-8,loc_id,ward,tiv_kes,loss_kes\n";
-                const encoded = encodeURI(csvData);
-                const link = document.createElement("a");
-                link.setAttribute("href", encoded);
-                link.setAttribute("download", `kenya_re_cat_${scenario}.csv`);
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                toast.success("Export initiated");
-              }}
-              className="hidden lg:inline-flex text-xs"
-            >
-              <Download className="mr-1.5 size-3.5" />
-              Export
-            </Button>
-            <div className="hidden sm:flex items-center gap-1.5 border-l border-slate-200 pl-2">
-              <span className="text-xs text-slate-600 font-medium truncate max-w-[80px] sm:max-w-none">
-                {user?.name || "Actuary"}
-              </span>
-              <User className="size-3.5 text-slate-500" />
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={logout}
-              className="text-slate-600 hover:text-red-600 cursor-pointer size-8 sm:size-9"
-              title="Logout"
-            >
-              <LogOut className="size-4" />
-            </Button>
+          {/* Right: Header Actions & Drawer Toggle */}
+          <div className="flex items-center gap-1.5 sm:gap-2">
             <Button
               variant="ghost"
               size="icon"
