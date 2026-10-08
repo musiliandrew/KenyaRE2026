@@ -383,6 +383,11 @@ export async function exportRiskBriefingPDF(
   y += summaryBoxHeight + 6;
 
   // Key Actuarial Findings
+  if (y > 250) {
+    doc.addPage();
+    y = 20;
+  }
+
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9.5);
   doc.setTextColor(0, 38, 77);
@@ -390,11 +395,16 @@ export async function exportRiskBriefingPDF(
   y += 4;
 
   briefing.key_findings.forEach((finding, idx) => {
+    const findingLines = doc.splitTextToSize(finding, 150);
+    const itemHeight = Math.max(10, findingLines.length * 4.2 + 5);
+
+    if (y + itemHeight > 270) {
+      doc.addPage();
+      y = 20;
+    }
+
     doc.setFillColor(255, 255, 255);
     doc.setDrawColor(226, 232, 240);
-    const findingLines = doc.splitTextToSize(finding, 166);
-    const itemHeight = Math.max(10, findingLines.length * 4 + 4);
-
     doc.roundedRect(14, y, 182, itemHeight, 1, 1, "FD");
 
     doc.setFont("helvetica", "bold");
@@ -409,9 +419,14 @@ export async function exportRiskBriefingPDF(
     y += itemHeight + 2.5;
   });
 
-  y += 4;
+  y += 3;
 
   // Actuarial Recommendations
+  if (y > 245) {
+    doc.addPage();
+    y = 20;
+  }
+
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9.5);
   doc.setTextColor(0, 38, 77);
@@ -419,11 +434,16 @@ export async function exportRiskBriefingPDF(
   y += 4;
 
   briefing.recommendations.forEach((rec, idx) => {
+    const recLines = doc.splitTextToSize(rec, 148);
+    const itemHeight = Math.max(10, recLines.length * 4.2 + 5);
+
+    if (y + itemHeight > 270) {
+      doc.addPage();
+      y = 20;
+    }
+
     doc.setFillColor(240, 253, 244);
     doc.setDrawColor(187, 247, 208);
-    const recLines = doc.splitTextToSize(rec, 166);
-    const itemHeight = Math.max(10, recLines.length * 4 + 4);
-
     doc.roundedRect(14, y, 182, itemHeight, 1, 1, "FD");
 
     doc.setFont("helvetica", "bold");
@@ -438,9 +458,14 @@ export async function exportRiskBriefingPDF(
     y += itemHeight + 2.5;
   });
 
-  y += 6;
-
   // Signatures
+  if (y > 240) {
+    doc.addPage();
+    y = 25;
+  } else {
+    y += 5;
+  }
+
   doc.setDrawColor(203, 213, 225);
   doc.line(14, y + 14, 75, y + 14);
   doc.line(125, y + 14, 186, y + 14);
@@ -451,7 +476,12 @@ export async function exportRiskBriefingPDF(
   doc.text("Chief Risk Officer / Actuary", 14, y + 19);
   doc.text("Managing Director / Board Committee", 125, y + 19);
 
-  drawFooter(doc, 1, 1);
+  const totalPages = (doc as any).internal.getNumberOfPages();
+  for (let p = 1; p <= totalPages; p++) {
+    doc.setPage(p);
+    drawFooter(doc, p, totalPages);
+  }
+
   doc.save(`KenyaRe_Executive_Briefing_${scenario}.pdf`);
 }
 
@@ -459,25 +489,40 @@ export async function exportRiskBriefingPDF(
  * EXPORT 3: Exposure Portfolio Export PDF
  */
 export async function exportExposurePortfolioPDF(
-  stats: {
-    totalAssets: number;
-    totalTIV: number;
-    aalKES: number;
-    pml100yKES: number;
-  },
-  sampleAssets: Array<{
-    loc_id: string;
-    name: string;
-    ward: string;
-    housing_class: string;
-    tiv_kes: number;
-  }>
+  assetsOrStats: any,
+  datasetNameOrSampleAssets?: any,
+  tivKesParam?: number,
+  optionalStats?: { aalKES?: number; pml100yKES?: number }
 ) {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+  let assetsList: any[] = [];
+  let datasetTitle = "Exposure Portfolio";
+  let totalTIV = 0;
+  let totalAssets = 0;
+  let aalVal = 0;
+  let pmlVal = 0;
+
+  if (Array.isArray(assetsOrStats)) {
+    assetsList = assetsOrStats;
+    datasetTitle = typeof datasetNameOrSampleAssets === "string" ? datasetNameOrSampleAssets : "Active Portfolio";
+    totalAssets = assetsList.length;
+    totalTIV = tivKesParam || assetsList.reduce((s, a) => s + (a.tiv_kes || 0), 0);
+    aalVal = optionalStats?.aalKES || totalTIV * 0.00028;
+    pmlVal = optionalStats?.pml100yKES || totalTIV * 0.0032;
+  } else if (assetsOrStats && typeof assetsOrStats === "object") {
+    totalAssets = assetsOrStats.totalAssets || (Array.isArray(datasetNameOrSampleAssets) ? datasetNameOrSampleAssets.length : 0);
+    totalTIV = assetsOrStats.totalTIV || 0;
+    aalVal = assetsOrStats.aalKES || 0;
+    pmlVal = assetsOrStats.pml100yKES || 0;
+    assetsList = Array.isArray(datasetNameOrSampleAssets) ? datasetNameOrSampleAssets : [];
+    datasetTitle = "Nairobi Urban Flood Exposure Portfolio Summary";
+  }
+
   let y = await drawHeader(
     doc,
-    "Nairobi Urban Flood Exposure Portfolio Summary",
-    `Total Monitored Portfolio: ${stats.totalAssets.toLocaleString()} Properties · Kenya Re Cat Model`
+    "Kenya Re Exposure Portfolio Schedule",
+    `Dataset: ${datasetTitle} · Total Monitored: ${totalAssets.toLocaleString()} Properties · Kenya Re Cat Model`
   );
 
   // Portfolio KPI Row
@@ -494,57 +539,76 @@ export async function exportExposurePortfolioPDF(
   doc.text("EXPOSURE UNITS", 165, y + 7);
 
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
+  doc.setFontSize(10.5);
   doc.setTextColor(0, 38, 77);
-  doc.text(formatKES(stats.totalTIV), 20, y + 15);
-  doc.text(formatKES(stats.aalKES), 70, y + 15);
+  doc.text(formatKES(totalTIV), 20, y + 15);
+  doc.text(formatKES(aalVal), 70, y + 15);
   doc.setTextColor(210, 18, 69);
-  doc.text(formatKES(stats.pml100yKES), 120, y + 15);
+  doc.text(formatKES(pmlVal), 120, y + 15);
   doc.setTextColor(15, 23, 42);
-  doc.text(`${stats.totalAssets}`, 165, y + 15);
+  doc.text(`${totalAssets}`, 165, y + 15);
 
-  y += 30;
+  y += 28;
 
-  // Table of Top Assets
+  // Table of Assets
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9.5);
   doc.setTextColor(0, 38, 77);
-  doc.text("SAMPLE ASSET AUDIT SCHEDULE", 14, y);
+  doc.text("PORTFOLIO ASSET AUDIT SCHEDULE", 14, y);
   y += 4;
 
-  // Table header
-  doc.setFillColor(0, 38, 77);
-  doc.rect(14, y, 182, 7, "F");
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(8);
-  doc.setTextColor(255, 255, 255);
-  doc.text("Asset ID", 18, y + 5);
-  doc.text("Name / Locality", 45, y + 5);
-  doc.text("Ward", 95, y + 5);
-  doc.text("Typology", 135, y + 5);
-  doc.text("TIV (KES)", 192, y + 5, { align: "right" });
+  const renderTableHeader = (currY: number) => {
+    doc.setFillColor(0, 38, 77);
+    doc.rect(14, currY, 182, 7, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7.5);
+    doc.setTextColor(255, 255, 255);
+    doc.text("Asset ID", 18, currY + 4.8);
+    doc.text("Name / Description", 45, currY + 4.8);
+    doc.text("Source File", 92, currY + 4.8);
+    doc.text("Locality", 125, currY + 4.8);
+    doc.text("Typology", 152, currY + 4.8);
+    doc.text("TIV (KES)", 192, currY + 4.8, { align: "right" });
+    return currY + 7;
+  };
 
-  y += 7;
+  y = renderTableHeader(y);
 
-  // Rows
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(7.5);
+  doc.setFontSize(7.2);
 
-  sampleAssets.slice(0, 18).forEach((a, i) => {
+  const displayAssets = assetsList.slice(0, 50);
+  displayAssets.forEach((a, i) => {
+    if (y > 270) {
+      doc.addPage();
+      y = 18;
+      y = renderTableHeader(y);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.2);
+    }
+
     if (i % 2 === 0) {
       doc.setFillColor(248, 250, 252);
-      doc.rect(14, y, 182, 6.5, "F");
+      doc.rect(14, y, 182, 6, "F");
     }
     doc.setTextColor(15, 23, 42);
-    doc.text(a.loc_id, 18, y + 4.5);
-    doc.text(a.name ? a.name.slice(0, 24) : "Commercial Asset", 45, y + 4.5);
-    doc.text(a.ward ? a.ward.slice(0, 18) : "Nairobi", 95, y + 4.5);
-    doc.text(CLASS_LABEL[a.housing_class as HousingClass] || a.housing_class, 135, y + 4.5);
-    doc.text(formatKES(a.tiv_kes), 192, y + 4.5, { align: "right" });
-    y += 6.5;
+    doc.text(String(a.loc_id || a.id || `A-${i + 1}`).slice(0, 14), 18, y + 4.2);
+    doc.text(String(a.name || "Commercial Asset").slice(0, 22), 45, y + 4.2);
+    doc.text(String(a.source_file || datasetTitle).slice(0, 16), 92, y + 4.2);
+    doc.text(String(a.ward || "Nairobi").slice(0, 14), 125, y + 4.2);
+    const cls = a.housing_class ? (CLASS_LABEL[a.housing_class as HousingClass] || a.housing_class) : "RCC";
+    doc.text(String(cls).slice(0, 15), 152, y + 4.2);
+    doc.text(formatKES(a.tiv_kes || 0), 192, y + 4.2, { align: "right" });
+    y += 6;
   });
 
-  drawFooter(doc, 1, 1);
-  doc.save(`KenyaRe_Portfolio_Summary_${Date.now()}.pdf`);
+  const totalPages = (doc as any).internal.getNumberOfPages();
+  for (let p = 1; p <= totalPages; p++) {
+    doc.setPage(p);
+    drawFooter(doc, p, totalPages);
+  }
+
+  const safeFilename = datasetTitle.toLowerCase().replace(/[^a-z0-9]/g, "_").slice(0, 30);
+  doc.save(`KenyaRe_Portfolio_Schedule_${safeFilename}_${Date.now()}.pdf`);
 }
 

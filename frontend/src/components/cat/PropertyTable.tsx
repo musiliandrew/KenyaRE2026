@@ -20,14 +20,17 @@ export function PropertyTable({
   assets: propAssets,
   returnPeriod,
   rp,
+  onSelectAsset,
 }: {
   assets?: ExposureAsset[];
   returnPeriod?: RP;
   rp?: RP;
+  onSelectAsset?: (asset: ExposureAsset) => void;
 }) {
   const activeRP = rp || returnPeriod || "100y";
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedClass, setSelectedClass] = useState<string>("all");
+  const [selectedTier, setSelectedTier] = useState<string>("all");
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
@@ -48,9 +51,10 @@ export function PropertyTable({
         (p.name && p.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
       const matchClass = selectedClass === "all" || p.housing_class === selectedClass;
-      return matchSearch && matchClass;
+      const matchTier = selectedTier === "all" || p.risk_level === selectedTier;
+      return matchSearch && matchClass && matchTier;
     });
-  }, [assets, searchQuery, selectedClass]);
+  }, [assets, searchQuery, selectedClass, selectedTier]);
 
   const totalPages = Math.ceil(filtered.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -110,6 +114,20 @@ export function PropertyTable({
             <option value="concrete_rcc">Concrete RCC</option>
           </select>
 
+          <select
+            value={selectedTier}
+            onChange={(e) => {
+              setSelectedTier(e.target.value);
+              setCurrentPage(1);
+            }}
+            className="flex-1 sm:flex-initial px-2.5 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:ring-1 focus:ring-[#00264D] outline-none truncate"
+          >
+            <option value="all">All Risk Tiers</option>
+            <option value="high">🔴 High Tier</option>
+            <option value="mid">🟡 Medium Tier</option>
+            <option value="low">🟢 Low Tier</option>
+          </select>
+
           <Button variant="outline" size="sm" onClick={handleExportCSV} className="gap-1.5 text-xs shrink-0 cursor-pointer">
             <Download className="size-3.5" />
             <span className="hidden xs:inline">Export</span> CSV
@@ -148,8 +166,26 @@ export function PropertyTable({
                   </TableRow>
                 ) : (
                   paginated.map((prop) => (
-                    <TableRow key={prop.loc_id} className="hover:bg-slate-50 text-xs">
-                      <TableCell className="font-mono font-medium text-slate-800">{prop.loc_id}</TableCell>
+                    <TableRow
+                      key={prop.loc_id}
+                      onClick={() => onSelectAsset?.(prop)}
+                      className={`hover:bg-blue-50/40 text-xs transition-colors ${
+                        onSelectAsset ? "cursor-pointer" : ""
+                      }`}
+                    >
+                      <TableCell className="font-mono font-medium text-slate-800">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSelectAsset?.(prop);
+                          }}
+                          className="font-mono font-bold text-[#00264D] hover:text-[#D21245] hover:underline cursor-pointer text-left inline-flex items-center gap-1"
+                          title={`Inspect ${prop.loc_id} dossier`}
+                        >
+                          <span>{prop.loc_id}</span>
+                        </button>
+                      </TableCell>
                       <TableCell className="text-slate-900 font-medium">{prop.ward}</TableCell>
                       <TableCell className="text-slate-600">
                         {CLASS_LABEL[prop.housing_class] || prop.housing_class}
@@ -159,17 +195,32 @@ export function PropertyTable({
                       <TableCell className="font-mono text-slate-700">{prop.depth_m.toFixed(2)} m</TableCell>
                       <TableCell className="font-mono text-red-700 font-medium">{formatKES(prop.loss_kes)}</TableCell>
                       <TableCell className="text-right">
-                        <Badge
-                          className={
-                            prop.risk_level === "high"
-                              ? "bg-red-100 text-red-700"
-                              : prop.risk_level === "mid"
-                              ? "bg-amber-100 text-amber-700"
-                              : "bg-emerald-100 text-emerald-700"
-                          }
-                        >
-                          {prop.risk_level.toUpperCase()}
-                        </Badge>
+                        <div className="flex items-center justify-end gap-1.5">
+                          <Badge
+                            className={
+                              prop.risk_level === "high"
+                                ? "bg-red-100 text-red-700"
+                                : prop.risk_level === "mid"
+                                ? "bg-amber-100 text-amber-700"
+                                : "bg-emerald-100 text-emerald-700"
+                            }
+                          >
+                            {prop.risk_level.toUpperCase()}
+                          </Badge>
+                          {onSelectAsset && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onSelectAsset(prop);
+                              }}
+                              className="h-6 text-[11px] text-[#00264D] hover:bg-blue-50 px-2 cursor-pointer hidden sm:inline-flex"
+                            >
+                              Inspect →
+                            </Button>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))

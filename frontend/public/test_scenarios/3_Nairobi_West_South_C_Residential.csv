@@ -1,0 +1,16 @@
+loc_id,name,ward,housing_class,area_sqm,tiv_kes,lat,lon
+NW-001,Akila Estate Residential Courts Block A,Nairobi West,permanent_masonry,4500,315000000,-1.3145,36.822
+NW-002,Akila Estate Residential Courts Block B,Nairobi West,permanent_masonry,4200,294000000,-1.315,36.8225
+NW-003,Mugoya Estate Phase 2 Maisonettes,South C,permanent_masonry,6500,487500000,-1.321,36.834
+NW-004,Muhoho Avenue Commercial Center,South C,concrete_rcc,5200,468000000,-1.319,36.831
+NW-005,Madaraka Estate Phase 1 Block C,Nairobi West,concrete_rcc,7800,624000000,-1.309,36.818
+NW-006,Bellevue Commercial Offices,South C,concrete_rcc,8500,765000000,-1.326,36.841
+NW-007,Kodi Road Residential Rowhouses,Nairobi West,permanent_masonry,3100,217000000,-1.3175,36.825
+NW-008,Halai Sports Club Annex,South C,permanent_masonry,2800,168000000,-1.3235,36.836
+NW-009,South C Five Star Gardens,South C,permanent_masonry,8900,712000000,-1.327,36.8385
+NW-010,Ole Shapara Avenue Retail Suites,South C,permanent_masonry,3400,255000000,-1.3205,36.8325
+NW-011,Gandhi Avenue Flats,Nairobi West,permanent_masonry,4100,287000000,-1.313,36.824
+NW-012,Nairobi Dam View Villas,Nairobi West,permanent_masonry,5600,448000000,-1.316,36.819
+NW-013,Popo Road Distribution Yard,South C,semi_permanent,3800,152000000,-1.324,36.843
+NW-014,South C Mosque Plaza,South C,concrete_rcc,4400,396000000,-1.322,36.835
+NW-015,T-Mall Annex Commercial,Nairobi West,concrete_rcc,9200,920000000,-1.311,36.821

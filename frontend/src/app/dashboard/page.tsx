@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import {
@@ -23,7 +23,21 @@ import {
   LogOut,
   RefreshCw,
   Sparkles,
-  FileText
+  FileText,
+  FileDown,
+  Loader2,
+  Layers,
+  PlusCircle,
+  CheckCircle,
+  RotateCcw,
+  Trash2,
+  FolderArchive,
+  Edit3,
+  Check,
+  Globe,
+  FileSpreadsheet,
+  UploadCloud,
+  
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AnimatedNumber } from "@/components/cat/AnimatedNumber";
@@ -32,7 +46,11 @@ import { VulnerabilityCurves } from "@/components/cat/VulnerabilityCurves";
 import { PropertyTable } from "@/components/cat/PropertyTable";
 import { RiskBriefing } from "@/components/cat/RiskBriefing";
 import { AIExposureForm } from "@/components/cat/AIExposureForm";
+import { QuoteGenerator } from "@/components/cat/QuoteGenerator";
 import { MapProviderSwitcher, type MapProvider } from "@/components/cat/MapProviderSwitcher";
+import { IngestTestDataModal, type DatasetRun } from "@/components/cat/IngestTestDataModal";
+import { AssetDetailModal } from "@/components/cat/AssetDetailModal";
+import { exportExposurePortfolioPDF } from "@/lib/pdfGenerator";
 import { useAuth } from "@/contexts/AuthContext";
 import { useApi } from "@/hooks/useApi";
 import { toast } from "sonner";
@@ -76,18 +94,18 @@ const RiskMapDeckGL = dynamic(
   }
 );
 
-type PanelType = "overview" | "hazard" | "vulnerability" | "exposure" | "loss" | "ai" | "assumptions";
+type PanelType = "overview" | "hazard" | "vulnerability" | "exposure" | "loss" | "ai" | "reports" | "repo" | "assumptions";
 
 const sidebarItems = [
   { id: "overview" as PanelType, label: "Overview", icon: Home },
-  { id: "hazard" as PanelType, label: "Hazard", icon: Activity },
+  { id: "hazard" as PanelType, label: "Hazard & 3D Map", icon: Activity },
   { id: "vulnerability" as PanelType, label: "Vulnerability", icon: Shield },
-  { id: "exposure" as PanelType, label: "Exposure", icon: Building2 },
-  { id: "loss" as PanelType, label: "Loss & EP", icon: BarChart3 },
-  { id: "ai" as PanelType, label: "AI Insights", icon: Cpu },
+  { id: "exposure" as PanelType, label: "Exposure Portfolio", icon: Building2 },
+  { id: "loss" as PanelType, label: "Loss & EP Curve", icon: BarChart3 },
+  { id: "ai" as PanelType, label: "AI Copilot", icon: Cpu },
+  { id: "reports" as PanelType, label: "Reports & PDF Slips", icon: FileText },
+  { id: "repo" as PanelType, label: "Dataset Repository", icon: FolderArchive },
   { id: "assumptions" as PanelType, label: "Data & Assumptions", icon: Database },
-    { id: "Reports" as PanelType, label: "Reports", icon: FileText },
-
 ];
 
 export default function DashboardPage() {
@@ -99,7 +117,98 @@ export default function DashboardPage() {
   const [isRunning, setIsRunning] = useState(false);
   const [lastRunResult, setLastRunResult] = useState<RunModelResponse | null>(null);
 
-  // Live backend data hooks
+  // Simulation Run Management with LocalStorage Persistence
+  const [runs, setRuns] = useState<DatasetRun[]>([]);
+  const [activeRunId, setActiveRunId] = useState<string>("baseline");
+  const [isIngestModalOpen, setIsIngestModalOpen] = useState(false);
+  const [selectedAssetForModal, setSelectedAssetForModal] = useState<ExposureAsset | null>(null);
+
+  // Load saved runs from localStorage on mount
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const saved = localStorage.getItem("kenya_re_dataset_runs");
+      if (saved) {
+        const parsed: DatasetRun[] = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setRuns(parsed);
+        }
+      }
+      const savedActiveId = localStorage.getItem("kenya_re_active_run_id");
+      if (savedActiveId) {
+        setActiveRunId(savedActiveId);
+      }
+    } catch (e) {
+      console.error("Failed to load saved dataset runs from localStorage", e);
+    }
+  }, []);
+
+  const persistRuns = (newRuns: DatasetRun[]) => {
+    setRuns(newRuns);
+    try {
+      localStorage.setItem("kenya_re_dataset_runs", JSON.stringify(newRuns));
+    } catch (e) {
+      console.warn("Storage quota exceeded or error saving runs", e);
+    }
+  };
+
+  const handleSelectRun = (runId: string) => {
+    setActiveRunId(runId);
+    try {
+      localStorage.setItem("kenya_re_active_run_id", runId);
+    } catch (e) {}
+  };
+
+  const handleRunCreated = (newRun: DatasetRun) => {
+    const filtered = runs.filter((r) => r.id !== newRun.id);
+    const updated = [newRun, ...filtered];
+    persistRuns(updated);
+    handleSelectRun(newRun.id);
+  };
+
+  const handleRenameRun = (runId: string, newName: string) => {
+    if (!newName.trim()) return;
+    const updated = runs.map((r) => (r.id === runId ? { ...r, name: newName.trim() } : r));
+    persistRuns(updated);
+    toast.success("Dataset renamed successfully.");
+  };
+
+  const handleDownloadRunCSV = (run: DatasetRun) => {
+    const headers = ["Asset_ID", "Name", "Ward", "Housing_Class", "TIV_KES", "Floor_Area_M2", "Latitude", "Longitude", "Flood_Depth_M", "Loss_KES", "Risk_Tier"];
+    const rows = run.assets.map((a) => [
+      a.loc_id,
+      `"${a.name || a.loc_id}"`,
+      `"${a.ward}"`,
+      a.housing_class,
+      a.tiv_kes,
+      a.floor_area_m2 || 1000,
+      a.lat,
+      a.lon ?? a.lng ?? 0,
+      a.depth_m?.toFixed(2) || "0.00",
+      a.loss_kes || 0,
+      a.risk_level || "low",
+    ]);
+    const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${(run.fileName || run.name).replace(/\s+/g, "_")}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleDeleteRun = (runId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const updated = runs.filter((r) => r.id !== runId);
+    persistRuns(updated);
+    if (activeRunId === runId) {
+      handleSelectRun(updated.length > 1 ? "all" : updated.length === 1 ? updated[0].id : "baseline");
+    }
+    toast.success("Dataset removed from saved records.");
+  };
+
+  // Live backend data hooks (Baseline)
   const {
     data: summary,
     loading: summaryLoading,
@@ -124,17 +233,239 @@ export default function DashboardPage() {
     refetch: refetchHotspots,
   } = useApi(() => api.hazardHotspots(scenario), [scenario]);
 
+  // Hydrological scaling ratios for uploaded datasets across return periods
+  const RP_FACTORS: Record<RP, number> = {
+    "5y": 0.65,
+    "10y": 0.78,
+    "25y": 1.0,
+    "50y": 1.25,
+    "100y": 1.48,
+  };
+
+  const getHydrologicalScale = (rp: RP): number => {
+    switch (rp) {
+      case "5y": return 0.70;
+      case "10y": return 0.84;
+      case "25y": return 1.00;
+      case "50y": return 1.18;
+      case "100y": return 1.38;
+      default: return 1.00;
+    }
+  };
+
+  // Consolidated Multi-Portfolio Calculation across all uploaded runs
+  const isConsolidated = activeRunId === "all";
+  const activeCustomRun = runs.find((r) => r.id === activeRunId) || null;
+
+  // Reactively scaled assets for custom run when scenario (5y, 10y, 25y, 50y, 100y) changes
+  const scaledCustomAssets = useMemo(() => {
+    if (!activeCustomRun) return [];
+    const scale = getHydrologicalScale(scenario);
+    return activeCustomRun.assets.map((a) => {
+      const depth = Math.max(0, (a.depth_m ?? 0.2) * scale);
+      const loss = Math.min(a.tiv_kes, (a.loss_kes ?? a.tiv_kes * 0.05) * scale);
+      const damageRatio = a.tiv_kes > 0 ? loss / a.tiv_kes : 0;
+      return {
+        ...a,
+        depth_m: depth,
+        loss_kes: loss,
+        damage_ratio: damageRatio,
+        risk_level: damageRatio > 0.35 ? "high" : damageRatio > 0.08 ? "mid" : "low",
+        tier_label: depth > 1.0 ? "Extreme Floodway" : depth > 0.4 ? "High Hazard" : "Moderate Pluvial",
+      };
+    });
+  }, [activeCustomRun, scenario]);
+
+  const consolidatedAssets = useMemo(() => {
+    if (!runs || runs.length === 0) return assetsData?.assets || [];
+    const scale = getHydrologicalScale(scenario);
+    return runs.flatMap((r) =>
+      r.assets.map((a) => {
+        const depth = Math.max(0, (a.depth_m ?? 0.2) * scale);
+        const loss = Math.min(a.tiv_kes, (a.loss_kes ?? a.tiv_kes * 0.05) * scale);
+        const damageRatio = a.tiv_kes > 0 ? loss / a.tiv_kes : 0;
+        return {
+          ...a,
+          depth_m: depth,
+          loss_kes: loss,
+          damage_ratio: damageRatio,
+          risk_level: damageRatio > 0.35 ? "high" : damageRatio > 0.08 ? "mid" : "low",
+          tier_label: depth > 1.0 ? "Extreme Floodway" : depth > 0.4 ? "High Hazard" : "Moderate Pluvial",
+          source_file: a.source_file || r.fileName || r.name,
+          dataset_name: r.name,
+          dataset_id: r.id,
+        };
+      })
+    );
+  }, [runs, assetsData, scenario]);
+
+  // Reactively scaled portfolio summary for custom run
+  const activeCustomSummary = useMemo<PortfolioSummary | null>(() => {
+    if (!activeCustomRun) return null;
+    const tiv = activeCustomRun.totalTivKes || activeCustomRun.summary?.tiv_kes || 0;
+    const metric = activeCustomRun.epData?.metrics?.find((m) => m.return_period === scenario);
+    const baseLoss = activeCustomRun.summary?.event_loss_kes || 0;
+    const baseRp = (activeCustomRun.summary?.active_rp as RP) || "25y";
+    const scale = RP_FACTORS[scenario] / (RP_FACTORS[baseRp] || 1.0);
+    const eventLoss = metric ? metric.portfolio_loss_kes : baseLoss * scale;
+    const lossRatio = tiv > 0 ? (eventLoss / tiv) * 100 : 0;
+
+    return {
+      tiv_kes: tiv,
+      event_loss_kes: eventLoss,
+      aal_kes: activeCustomRun.summary?.aal_kes || 0,
+      asset_count: activeCustomRun.assetCount || activeCustomRun.summary?.asset_count || 0,
+      active_rp: scenario,
+      hotspot_count: Math.min(8, activeCustomRun.assetCount),
+      pml_100y_kes:
+        activeCustomRun.epData?.metrics?.find((m) => m.return_period === "100y")?.portfolio_loss_kes ||
+        eventLoss * 1.35,
+      loss_ratio: lossRatio,
+      synthetic_notice: `Custom Dataset Run: ${activeCustomRun.name} (${scenario})`,
+    };
+  }, [activeCustomRun, scenario]);
+
+  const consolidatedSummary = useMemo<PortfolioSummary | null>(() => {
+    if (!runs || runs.length === 0) return summary;
+    const totalTiv = runs.reduce((acc, r) => acc + (r.summary?.tiv_kes || r.totalTivKes || 0), 0);
+    const totalAal = runs.reduce((acc, r) => acc + (r.summary?.aal_kes || 0), 0);
+    const totalCount = runs.reduce((acc, r) => acc + (r.summary?.asset_count || r.assetCount || 0), 0);
+
+    const totalEventLoss = runs.reduce((acc, r) => {
+      const metric = r.epData?.metrics?.find((m) => m.return_period === scenario);
+      if (metric) return acc + metric.portfolio_loss_kes;
+      const baseLoss = r.summary?.event_loss_kes || 0;
+      const baseRp = (r.summary?.active_rp as RP) || "25y";
+      const scale = RP_FACTORS[scenario] / (RP_FACTORS[baseRp] || 1.0);
+      return acc + baseLoss * scale;
+    }, 0);
+
+    const totalPml100 = runs.reduce((acc, r) => {
+      const metric = r.epData?.metrics?.find((m) => m.return_period === "100y");
+      return acc + (metric ? metric.portfolio_loss_kes : (r.summary?.pml_100y_kes || (r.summary?.event_loss_kes || 0) * 1.35));
+    }, 0);
+
+    const lossRatio = totalTiv > 0 ? (totalEventLoss / totalTiv) * 100 : 0;
+
+    return {
+      tiv_kes: totalTiv,
+      event_loss_kes: totalEventLoss,
+      aal_kes: totalAal,
+      asset_count: totalCount,
+      active_rp: scenario,
+      hotspot_count: Math.min(12, totalCount),
+      pml_100y_kes: totalPml100,
+      loss_ratio: lossRatio,
+      synthetic_notice: `Consolidated Portfolio (${runs.length} Saved Records Active · ${scenario})`,
+    };
+  }, [runs, summary, scenario]);
+
+  const consolidatedEP = useMemo<EPCurveResponse | null>(() => {
+    if (!runs || runs.length === 0) return epData;
+    const totalTiv = runs.reduce((acc, r) => acc + (r.summary?.tiv_kes || r.totalTivKes || 0), 0);
+    const totalAal = runs.reduce((acc, r) => acc + (r.summary?.aal_kes || 0), 0);
+
+    const rps: RP[] = ["5y", "10y", "25y", "50y", "100y"];
+    const metrics: ReturnPeriodMetric[] = rps.map((rpKey) => {
+      const losses = runs.map((r) => {
+        const found = r.epData?.metrics?.find((m) => m.return_period === rpKey);
+        return found ? found.portfolio_loss_kes : 0;
+      });
+      const summedLoss = losses.reduce((a, b) => a + b, 0);
+      const rpNum = parseInt(rpKey);
+      const lossRatio = totalTiv > 0 ? summedLoss / totalTiv : 0;
+      return {
+        return_period: rpKey,
+        years: rpNum,
+        annual_prob: 1 / rpNum,
+        portfolio_loss_kes: summedLoss,
+        loss_ratio: lossRatio,
+        pml_90: summedLoss * 0.9,
+        ai_adjusted_loss: summedLoss * 1.08,
+        ai_delta_kes: summedLoss * 0.08,
+      };
+    });
+
+    return {
+      metrics,
+      total_tiv_kes: totalTiv,
+      aal_kes: totalAal,
+      baseline_aal_kes: totalAal * 0.88,
+      ai_enabled: applyAI,
+    };
+  }, [runs, epData, applyAI]);
+
+  // Effective data routed dynamically to all dashboard tabs
+  const effectiveAssets = isConsolidated
+    ? consolidatedAssets
+    : activeCustomRun
+    ? scaledCustomAssets
+    : assetsData?.assets;
+
+  const effectiveSummary = isConsolidated
+    ? consolidatedSummary
+    : activeCustomRun
+    ? activeCustomSummary
+    : summary;
+
+  const effectiveEP = isConsolidated
+    ? consolidatedEP
+    : activeCustomRun
+    ? activeCustomRun.epData
+    : epData;
+
+  const effectiveLastRun = activeCustomRun
+    ? activeCustomRun.lastRunResult || lastRunResult
+    : lastRunResult;
+  const effectiveHotspots = hotspotsData;
+
+  // Global listener for asset inspection triggered from Mapbox / DeckGL popups
+  useEffect(() => {
+    const handleInspectEvent = (e: any) => {
+      const assetId = e.detail;
+      if (!assetId) return;
+      const found = effectiveAssets?.find(
+        (a) => (a.loc_id || (a as any).id) === assetId
+      );
+      if (found) {
+        setSelectedAssetForModal(found);
+      } else {
+        api
+          .assetDossier(assetId, scenario)
+          .then((res) => {
+            setSelectedAssetForModal(res.asset as any);
+          })
+          .catch(() => {});
+      }
+    };
+    window.addEventListener("kenya_re_inspect_asset", handleInspectEvent);
+    return () => window.removeEventListener("kenya_re_inspect_asset", handleInspectEvent);
+  }, [effectiveAssets, scenario]);
+
   const handleRunModel = async () => {
     setIsRunning(true);
     try {
-      const res = await api.runModel(scenario, applyAI);
+      const customPayload = activeCustomRun ? activeCustomRun.assets.map(a => ({
+        id: a.loc_id,
+        name: a.name,
+        lat: a.lat,
+        lng: a.lon,
+        housing_class: a.housing_class,
+        area_sqm: a.floor_area_m2,
+        tiv_kes: a.tiv_kes,
+        ward: a.ward
+      })) : undefined;
+
+      const res = await api.runModel(scenario, applyAI, customPayload as any);
       setLastRunResult(res);
       toast.success(
         `CAT Model Run Complete: ${formatKES(res.portfolio_loss_kes)} estimated event loss across ${res.asset_count} exposed buildings.`
       );
-      refetchSummary();
-      refetchEP();
-      refetchAssets();
+      if (!activeCustomRun) {
+        refetchSummary();
+        refetchEP();
+        refetchAssets();
+      }
     } catch (err: any) {
       toast.error(err.message || "Failed to execute model run");
     } finally {
@@ -220,8 +551,42 @@ export default function DashboardPage() {
             </Button>
           </div>
 
-          {/* Right: Header Actions & Drawer Toggle */}
+          {/* Right: Active Run Switcher, Ingest Button & Drawer Toggle */}
           <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* Run Switcher Dropdown (visible whenever a custom run exists) */}
+            {runs.length > 0 && (
+              <div className="relative hidden sm:block">
+                <select
+                  value={activeRunId}
+                  onChange={(e) => handleSelectRun(e.target.value)}
+                  className="appearance-none rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 pr-7 text-xs font-semibold text-slate-800 hover:border-slate-400 focus:outline-none focus:ring-1 focus:ring-[#00264D] max-w-[210px] truncate cursor-pointer shadow-2xs"
+                >
+                  <option value="all">🌐 ALL Datasets (Consolidated View)</option>
+                  <optgroup label="Saved Uploaded Files">
+                    {runs.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        📄 {r.fileName || r.name} ({r.assetCount})
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Standard Baseline">
+                    <option value="baseline">📁 Nairobi 600 Baseline</option>
+                  </optgroup>
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 size-3.5 text-slate-500" />
+              </div>
+            )}
+
+            {/* Ingest Test Data Modal Trigger */}
+            <Button
+              onClick={() => setIsIngestModalOpen(true)}
+              className="bg-[#00264D] hover:bg-[#001830] text-white text-xs font-semibold px-2.5 sm:px-3 h-8 gap-1.5 shadow-xs cursor-pointer"
+              title="Upload file (Word DOCX, PDF, text slip, or dataset) and launch dedicated dashboard run"
+            >
+              <UploadCloud className="size-3.5 text-white" />
+              <span>Upload File</span>
+            </Button>
+
             <Button
               variant="ghost"
               size="icon"
@@ -263,6 +628,15 @@ export default function DashboardPage() {
           >
             <Sparkles className="mr-1 size-3 text-emerald-600" />
             AI: {applyAI ? "ON" : "OFF"}
+          </Button>
+
+          <Button
+            onClick={() => setIsIngestModalOpen(true)}
+            size="sm"
+            className="h-8 px-2 bg-[#00264D] text-white hover:bg-[#001830] text-[11px] font-semibold shrink-0 cursor-pointer shadow-xs gap-1"
+          >
+            <PlusCircle className="size-3 text-[#D21245]" />
+            <span>Test Data</span>
           </Button>
 
           <Button
@@ -325,37 +699,6 @@ export default function DashboardPage() {
                 </button>
               ))}
             </div>
-
-            {/* Sub-navigation shortcuts */}
-            <div className="mt-5 pt-4 border-t border-slate-200 space-y-1">
-              <div className="px-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                Risk Platform Tools
-              </div>
-              <Link
-                href="/console/data"
-                onClick={() => setSidebarOpen(false)}
-                className="flex items-center justify-between rounded-lg px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
-              >
-                <span>1. Data Ingestion</span>
-                <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold">Step 1</span>
-              </Link>
-              <Link
-                href="/console/quotes"
-                onClick={() => setSidebarOpen(false)}
-                className="flex items-center justify-between rounded-lg px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
-              >
-                <span>4. Facultative Quotes</span>
-                <span className="text-[10px] bg-red-100 text-red-800 px-1.5 py-0.5 rounded font-bold">PDF Slip</span>
-              </Link>
-              <Link
-                href="/console/reports"
-                onClick={() => setSidebarOpen(false)}
-                className="flex items-center justify-between rounded-lg px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
-              >
-                <span>Executive Dossiers</span>
-                <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-bold">PDF</span>
-              </Link>
-            </div>
           </nav>
 
           <div className="p-3.5 border-t border-slate-200 bg-slate-50">
@@ -376,35 +719,214 @@ export default function DashboardPage() {
 
         {/* PANEL CONTENT WITH MOBILE PADDING FOR BOTTOM BAR */}
         <main className="flex-1 overflow-y-auto p-3 sm:p-6 pb-24 lg:pb-6">
+          {/* Active Dataset Run Banner (Consolidated or Dedicated) */}
+          {isConsolidated && runs.length > 0 && (
+            <div className="mb-4 rounded-xl border border-blue-300 bg-gradient-to-r from-blue-50 via-indigo-50 to-white p-3 sm:p-4 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[#00264D] text-white font-bold text-xs">
+                  🌐
+                </span>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs sm:text-sm font-bold text-[#00264D]">
+                      Consolidated Multi-Portfolio View: {runs.length} Saved Records Combined
+                    </span>
+                    <span className="rounded-full bg-blue-200/80 px-2 py-0.5 text-[10px] font-bold text-blue-900">
+                      {consolidatedAssets.length} Total Assets
+                    </span>
+                  </div>
+                  {/* File Badges that user can click to switch */}
+                  <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                    <span className="text-[10px] text-slate-500 font-semibold">Active Files:</span>
+                    {runs.map((r) => (
+                      <button
+                        key={r.id}
+                        onClick={() => handleSelectRun(r.id)}
+                        className="inline-flex items-center gap-1 text-[10px] font-semibold bg-white border border-slate-300 hover:border-[#00264D] text-[#00264D] px-2 py-0.5 rounded shadow-2xs cursor-pointer transition"
+                        title={`Click to view only ${r.fileName || r.name}`}
+                      >
+                        <span>📄 {r.fileName || r.name} ({r.assetCount})</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 self-start md:self-auto shrink-0 flex-wrap">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleSelectRun("baseline")}
+                  className="h-7 text-[11px] font-semibold text-slate-700 bg-white hover:bg-slate-50 border-slate-300 cursor-pointer"
+                >
+                  <RotateCcw className="size-3 mr-1" />
+                  Return to Baseline
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => setIsIngestModalOpen(true)}
+                  className="h-7 text-[11px] font-semibold bg-[#00264D] hover:bg-[#001830] text-white cursor-pointer"
+                >
+                  <UploadCloud className="size-3 mr-1 text-white" />
+                  + Upload Another File
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {!isConsolidated && activeCustomRun && (
+            <div className="mb-4 rounded-xl border border-emerald-300 bg-gradient-to-r from-emerald-50 via-teal-50 to-white p-3 sm:p-4 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white font-bold text-xs">
+                  ✓
+                </span>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs sm:text-sm font-bold text-emerald-950 truncate">
+                      Active File: {activeCustomRun.fileName || activeCustomRun.name}
+                    </span>
+                    <span className="rounded-full bg-emerald-200/80 px-2 py-0.5 text-[10px] font-bold text-emerald-900">
+                      {activeCustomRun.assetCount} Assets
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-emerald-800 mt-0.5">
+                    Portfolio TIV: <strong className="font-mono">{formatKES(activeCustomRun.totalTivKes)}</strong> · Uploaded: {activeCustomRun.timestamp}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 self-start md:self-auto shrink-0 flex-wrap">
+                {runs.length > 1 && (
+                  <Button
+                    size="sm"
+                    onClick={() => handleSelectRun("all")}
+                    className="h-7 text-[11px] font-semibold bg-[#00264D] hover:bg-[#001830] text-white cursor-pointer"
+                  >
+                    🌐 View Consolidated (All Files)
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleSelectRun("baseline")}
+                  className="h-7 text-[11px] font-semibold text-slate-700 bg-white hover:bg-slate-50 border-slate-300 cursor-pointer"
+                >
+                  <RotateCcw className="size-3 mr-1" />
+                  Return to Baseline
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={(e) => handleDeleteRun(activeCustomRun.id, e)}
+                  className="h-7 text-[11px] font-semibold text-red-700 hover:text-red-800 bg-white hover:bg-red-50 border-red-200 cursor-pointer"
+                  title="Remove this uploaded record"
+                >
+                  <Trash2 className="size-3 mr-1" />
+                  Delete File
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => setIsIngestModalOpen(true)}
+                  className="h-7 text-[11px] font-semibold bg-[#D21245] hover:bg-[#B50F3B] text-white cursor-pointer"
+                >
+                  <PlusCircle className="size-3 mr-1" />
+                  + Upload Another
+                </Button>
+              </div>
+            </div>
+          )}
+
           {activePanel === "overview" && (
             <OverviewPanel
               scenario={scenario}
-              summary={summary}
-              epData={epData}
-              assets={assetsData?.assets}
+              summary={effectiveSummary}
+              epData={effectiveEP}
+              assets={effectiveAssets}
               isLoading={summaryLoading}
+              onInspectAsset={setSelectedAssetForModal}
             />
           )}
           {activePanel === "hazard" && (
             <HazardPanel
               scenario={scenario}
-              assets={assetsData?.assets}
-              hotspots={hotspotsData}
+              assets={effectiveAssets}
+              hotspots={effectiveHotspots}
+              runs={runs}
+              activeRunId={activeRunId}
+              onSelectRun={handleSelectRun}
+              onInspectAsset={setSelectedAssetForModal}
             />
           )}
           {activePanel === "vulnerability" && <VulnerabilityPanel />}
-          {activePanel === "exposure" && <ExposurePanel rp={scenario} />}
+          {activePanel === "exposure" && (
+            <ExposurePanel
+              rp={scenario}
+              customAssets={effectiveAssets}
+              activeRunName={isConsolidated ? `Consolidated (${runs.length} Files)` : activeCustomRun?.fileName || activeCustomRun?.name || "Nairobi Baseline 600"}
+              runs={runs}
+              isConsolidated={isConsolidated}
+              onInspectAsset={setSelectedAssetForModal}
+            />
+          )}
           {activePanel === "loss" && (
             <LossPanel
               scenario={scenario}
-              epData={epData}
-              summary={summary}
-              lastRun={lastRunResult}
+              epData={effectiveEP}
+              summary={effectiveSummary}
+              lastRun={effectiveLastRun}
             />
           )}
-          {activePanel === "ai" && <AIPanel scenario={scenario} />}
+          {activePanel === "ai" && <AIPanel scenario={scenario} summary={effectiveSummary} />}
+          {activePanel === "reports" && (
+            <ReportsPanel
+              scenario={scenario}
+              summary={effectiveSummary}
+              assets={effectiveAssets}
+              activeRunName={activeCustomRun ? activeCustomRun.name : "Nairobi 600 Baseline"}
+              runs={runs}
+              activeRunId={activeRunId}
+              onSelectRun={handleSelectRun}
+            />
+          )}
+          {activePanel === "repo" && (
+            <RepositoryPanel
+              runs={runs}
+              activeRunId={activeRunId}
+              scenario={scenario}
+              onSelectRun={(id) => {
+                handleSelectRun(id);
+                setActivePanel("overview");
+              }}
+              onRenameRun={handleRenameRun}
+              onDeleteRun={handleDeleteRun}
+              onDownloadCSV={handleDownloadRunCSV}
+              onOpenIngestModal={() => setIsIngestModalOpen(true)}
+            />
+          )}
           {activePanel === "assumptions" && <AssumptionsPanel />}
         </main>
+
+        {/* Modal for Ingesting Test Data and Launching Dedicated Run */}
+        <IngestTestDataModal
+          isOpen={isIngestModalOpen}
+          onClose={() => setIsIngestModalOpen(false)}
+          onRunCreated={handleRunCreated}
+          activeScenario={scenario}
+          applyAI={applyAI}
+        />
+
+        {/* Dedicated Single-Asset Risk Dossier & Actuarial Inspection Modal */}
+        <AssetDetailModal
+          isOpen={!!selectedAssetForModal}
+          onClose={() => setSelectedAssetForModal(null)}
+          asset={selectedAssetForModal}
+          activeScenario={scenario}
+          portfolioAssets={effectiveAssets}
+          onSelectAsset={(a) => setSelectedAssetForModal(a)}
+          onOpenFacultativeQuote={() => {
+            setActivePanel("reports");
+          }}
+        />
       </div>
 
       {/* MOBILE STICKY THUMB-BAR (< lg screens) */}
@@ -452,12 +974,14 @@ function OverviewPanel({
   epData,
   assets,
   isLoading,
+  onInspectAsset,
 }: {
   scenario: RP;
   summary: PortfolioSummary | null;
   epData: EPCurveResponse | null;
   assets?: ExposureAsset[];
   isLoading: boolean;
+  onInspectAsset?: (asset: ExposureAsset) => void;
 }) {
   const tiv = summary?.tiv_kes ?? 63635340000;
   const eventLoss = summary?.event_loss_kes ?? 0;
@@ -534,22 +1058,41 @@ function OverviewPanel({
         <div className="divide-y divide-slate-100">
           {assets && assets.length > 0 ? (
             assets.slice(0, 5).map((b) => (
-              <div key={b.loc_id} className="flex items-center justify-between py-2.5 first:pt-0 last:pb-0 gap-2">
+              <div
+                key={b.loc_id}
+                onClick={() => onInspectAsset?.(b)}
+                className="flex items-center justify-between py-2.5 first:pt-0 last:pb-0 gap-2 hover:bg-blue-50/50 cursor-pointer rounded-lg px-2.5 -mx-2.5 transition"
+                title={`Click to inspect ${b.loc_id} full dossier`}
+              >
                 <div className="min-w-0">
-                  <div className="font-semibold text-xs sm:text-sm text-slate-900 truncate">
-                    {b.name || b.ward}
+                  <div className="font-semibold text-xs sm:text-sm text-slate-900 truncate flex items-center gap-2">
+                    <span>{b.name || b.ward}</span>
+                    <span className="text-[10px] font-mono font-bold text-[#00264D] bg-slate-100 px-1.5 py-0.2 rounded">
+                      {b.loc_id}
+                    </span>
                   </div>
-                  <div className="text-[10px] sm:text-xs text-slate-500 font-mono truncate">
-                    {b.loc_id} · {b.ward}
+                  <div className="text-[10px] sm:text-xs text-slate-500 font-mono truncate mt-0.5">
+                    {b.ward} · {CLASS_LABEL[b.housing_class] || b.housing_class}
                   </div>
                 </div>
-                <div className="text-right shrink-0">
-                  <div className="font-mono text-xs sm:text-sm font-semibold text-slate-900">
-                    {formatKES(b.tiv_kes)}
+                <div className="text-right shrink-0 flex items-center gap-3">
+                  <div>
+                    <div className="font-mono text-xs sm:text-sm font-semibold text-[#00264D]">
+                      {formatKES(b.tiv_kes)}
+                    </div>
+                    <div className="text-[10px] sm:text-xs text-slate-500">
+                      {CLASS_LABEL[b.housing_class] || b.housing_class}
+                    </div>
                   </div>
-                  <div className="text-[10px] sm:text-xs text-slate-500">
-                    {CLASS_LABEL[b.housing_class] || b.housing_class}
-                  </div>
+                  {onInspectAsset && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 text-[11px] text-[#00264D] hover:bg-blue-100/60 px-2 cursor-pointer hidden sm:inline-flex"
+                    >
+                      Inspect →
+                    </Button>
+                  )}
                 </div>
               </div>
             ))
@@ -568,27 +1111,93 @@ function HazardPanel({
   scenario,
   assets,
   hotspots,
+  runs = [],
+  activeRunId = "baseline",
+  onSelectRun,
+  onInspectAsset,
 }: {
   scenario: RP;
   assets?: ExposureAsset[];
   hotspots?: Hotspot[] | null;
+  runs?: DatasetRun[];
+  activeRunId?: string;
+  onSelectRun?: (id: string) => void;
+  onInspectAsset?: (asset: ExposureAsset) => void;
 }) {
   const [selectedBuilding, setSelectedBuilding] = useState<ExposureAsset | null>(null);
   const [mapProvider, setMapProvider] = useState<MapProvider>("mapbox");
+  const [areaFilter, setAreaFilter] = useState<string>(activeRunId || "all");
+
+  useEffect(() => {
+    if (activeRunId) {
+      setAreaFilter(activeRunId);
+    }
+  }, [activeRunId]);
+
+  // Extract assets for the chosen file/run to immediately re-render map pinpoints
+  const mapAssets = useMemo(() => {
+    if (areaFilter === "all") {
+      if (runs && runs.length > 0) {
+        return runs.flatMap((r) => r.assets);
+      }
+      return assets || [];
+    }
+    if (areaFilter === "baseline") {
+      return (assets || []).filter((a) => !a.dataset_id);
+    }
+    const matched = runs.find((r) => r.id === areaFilter);
+    if (matched && matched.assets && matched.assets.length > 0) {
+      return matched.assets;
+    }
+    return (assets || []).filter(
+      (a) =>
+        a.dataset_id === areaFilter ||
+        a.source_file === areaFilter ||
+        a.dataset_name === areaFilter
+    );
+  }, [assets, areaFilter, runs]);
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-[#00264D]">Hazard Analysis</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-[#00264D]">Hazard & Geospatial Risk Analysis</h1>
           <p className="text-xs sm:text-sm text-slate-600">
             Nairobi raster flood susceptibility layer · {RP_LIST.find((s) => s.rp === scenario)?.label} ({scenario})
           </p>
         </div>
-        <MapProviderSwitcher
-          currentProvider={mapProvider}
-          onProviderChange={setMapProvider}
-        />
+
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Dataset Area Filter */}
+          {runs.length > 0 && (
+            <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-lg">
+              <span className="text-[11px] font-semibold text-slate-500 pl-2">View File:</span>
+              <select
+                value={areaFilter}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setAreaFilter(val);
+                  setSelectedBuilding(null);
+                  if (onSelectRun) onSelectRun(val);
+                }}
+                className="text-xs bg-white border border-slate-200 rounded px-2 py-1 font-semibold text-slate-800 cursor-pointer focus:outline-none max-w-[170px] truncate"
+              >
+                <option value="all">🌐 All Areas ({assets?.length || 0})</option>
+                {runs.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    📄 {r.fileName || r.name} ({r.assetCount})
+                  </option>
+                ))}
+                <option value="baseline">🏛️ Nairobi 600 Baseline</option>
+              </select>
+            </div>
+          )}
+
+          <MapProviderSwitcher
+            currentProvider={mapProvider}
+            onProviderChange={setMapProvider}
+          />
+        </div>
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white shadow-xs overflow-hidden">
@@ -598,7 +1207,7 @@ function HazardPanel({
               rp={scenario}
               filter="all"
               showHotspots={true}
-              assets={assets}
+              assets={mapAssets}
               hotspots={hotspots || undefined}
               selectedBuilding={selectedBuilding}
               selectedHotspot={null}
@@ -610,7 +1219,7 @@ function HazardPanel({
               rp={scenario}
               filter="all"
               showHotspots={true}
-              assets={assets}
+              assets={mapAssets}
               hotspots={hotspots || undefined}
               selectedBuilding={selectedBuilding}
               selectedHotspot={null}
@@ -621,21 +1230,75 @@ function HazardPanel({
         </div>
       </div>
 
+      {/* Selected Asset Detailed Dossier Card */}
       {selectedBuilding && (
-        <div className="rounded-xl border border-[#00264D]/20 bg-white p-3.5 sm:p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-[#D21245]">Selected Asset</div>
-            <div className="text-base sm:text-lg font-bold text-[#00264D] truncate">
-              {selectedBuilding.name || selectedBuilding.loc_id}
+        <div className="rounded-xl border-2 border-[#00264D]/30 bg-gradient-to-r from-slate-50 via-white to-blue-50/40 p-3.5 sm:p-5 shadow-xs relative">
+          <button
+            onClick={() => setSelectedBuilding(null)}
+            className="absolute top-3 right-3 text-slate-400 hover:text-slate-600 cursor-pointer p-1 rounded-md hover:bg-slate-100"
+            title="Deselect asset"
+          >
+            <X className="size-4" />
+          </button>
+
+          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 pr-6">
+            <div className="min-w-0 space-y-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[#D21245] bg-red-50 border border-red-200 px-2 py-0.5 rounded">
+                  Inspected Asset
+                </span>
+                {selectedBuilding.source_file && (
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-200">
+                    📄 Source: {selectedBuilding.source_file}
+                  </span>
+                )}
+                <span className="text-[10px] text-slate-500 font-mono">
+                  ID: {selectedBuilding.loc_id || (selectedBuilding as any).id}
+                </span>
+              </div>
+
+              <div className="text-base sm:text-lg font-bold text-[#00264D] truncate">
+                {selectedBuilding.name || selectedBuilding.loc_id}
+              </div>
+
+              <div className="text-xs text-slate-600 flex flex-wrap gap-x-4 gap-y-1 pt-1">
+                <span>Locality / Ward: <strong className="text-slate-800">{selectedBuilding.ward}</strong></span>
+                <span>Typology: <strong className="text-slate-800 capitalize">{CLASS_LABEL[selectedBuilding.housing_class] || selectedBuilding.housing_class}</strong></span>
+                <span>Area: <strong className="text-slate-800">{selectedBuilding.floor_area_m2 ? `${selectedBuilding.floor_area_m2.toLocaleString()} m²` : "N/A"}</strong></span>
+                <span>Coordinates: <strong className="font-mono text-slate-700">{selectedBuilding.lat?.toFixed(4)}, {(selectedBuilding.lon ?? (selectedBuilding as any).lng)?.toFixed(4)}</strong></span>
+              </div>
             </div>
-            <div className="text-[11px] sm:text-xs text-slate-600 mt-0.5">
-              Ward: {selectedBuilding.ward} · {CLASS_LABEL[selectedBuilding.housing_class]} · Hazard: {selectedBuilding.hazard_score.toFixed(3)}
+
+            <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center border-t sm:border-0 border-slate-200 pt-3 sm:pt-0 shrink-0 gap-1">
+              <div className="text-left sm:text-right">
+                <span className="text-[10px] text-slate-500 uppercase font-semibold">TIV Exposure</span>
+                <div className="text-lg sm:text-xl font-bold font-mono text-slate-900">{formatKES(selectedBuilding.tiv_kes)}</div>
+              </div>
+              <div className="text-right">
+                <span className="text-xs font-bold text-red-600 block">
+                  Loss: {formatKES(selectedBuilding.loss_kes || 0)} ({((selectedBuilding.damage_ratio || 0) * 100).toFixed(1)}%)
+                </span>
+                <div className="text-[11px] text-slate-600 font-mono">
+                  Water Depth: <strong className="text-red-700">{(selectedBuilding.depth_m || 0).toFixed(2)} m</strong>
+                </div>
+              </div>
             </div>
           </div>
-          <div className="text-left sm:text-right shrink-0 pt-2 sm:pt-0 border-t sm:border-0 border-slate-100">
-            <div className="text-[10px] text-slate-500 uppercase font-semibold">TIV Exposure</div>
-            <div className="text-lg sm:text-xl font-bold font-mono text-slate-900">{formatKES(selectedBuilding.tiv_kes)}</div>
-            <div className="text-xs text-red-600 font-semibold">Loss: {formatKES(selectedBuilding.loss_kes)}</div>
+
+          <div className="mt-3.5 pt-3 border-t border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <span className="text-xs text-slate-500">
+              Interactive JRC Vulnerability Curve (0m to 4.5m), Calibrated Parameters & 5y–100y EP Schedule
+            </span>
+            {onInspectAsset && (
+              <Button
+                size="sm"
+                onClick={() => onInspectAsset(selectedBuilding)}
+                className="bg-[#00264D] hover:bg-[#001830] text-white text-xs gap-1.5 cursor-pointer shadow-xs self-start sm:self-auto shrink-0"
+              >
+                <Building2 className="size-3.5" />
+                <span>Inspect Full Asset Dossier (EP, Curve & Parameters) →</span>
+              </Button>
+            )}
           </div>
         </div>
       )}
@@ -647,7 +1310,7 @@ function HazardPanel({
             <h4 className="font-semibold text-amber-900 text-xs sm:text-sm">Actuarial Interpretation Note</h4>
             <p className="text-[11px] sm:text-xs text-amber-800 mt-0.5 leading-relaxed">
               Hazard scores combine terrain slope, NASA DEM relative elevation to Nairobi river corridors, and runoff indices.
-              The AI layer highlights drainage blockage hotspots along informal and commercial river settlements.
+              Clicking any point on the map retrieves localized flood depth and single-risk estimated damage ratios.
             </p>
           </div>
         </div>
@@ -721,18 +1384,259 @@ function VulnerabilityPanel() {
   );
 }
 
-function ExposurePanel({ rp }: { rp: RP }) {
+function ExposurePanel({
+  rp,
+  customAssets,
+  activeRunName,
+  runs = [],
+  isConsolidated = false,
+  onInspectAsset,
+}: {
+  rp: RP;
+  customAssets?: ExposureAsset[];
+  activeRunName?: string;
+  runs?: DatasetRun[];
+  isConsolidated?: boolean;
+  onInspectAsset?: (asset: ExposureAsset) => void;
+}) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [fileFilter, setFileFilter] = useState("all");
+  const [classFilter, setClassFilter] = useState("all");
+  const [tierFilter, setTierFilter] = useState("all");
+
+  if (customAssets && customAssets.length > 0) {
+    const filtered = customAssets.filter((a) => {
+      const matchSearch =
+        searchQuery === "" ||
+        a.loc_id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        a.ward.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (a.name && a.name.toLowerCase().includes(searchQuery.toLowerCase()));
+
+      const matchFile =
+        fileFilter === "all" ||
+        a.source_file === fileFilter ||
+        a.dataset_id === fileFilter ||
+        a.dataset_name === fileFilter;
+
+      const matchClass = classFilter === "all" || a.housing_class === classFilter;
+      const matchTier = tierFilter === "all" || a.risk_level === tierFilter;
+
+      return matchSearch && matchFile && matchClass && matchTier;
+    });
+
+    const totalTiv = filtered.reduce((sum, a) => sum + a.tiv_kes, 0);
+    const totalLoss = filtered.reduce((sum, a) => sum + (a.loss_kes || 0), 0);
+
+    // Extract unique source files for dropdown
+    const availableFiles = Array.from(
+      new Set(customAssets.map((a) => a.source_file).filter(Boolean))
+    );
+
+    const handleExportCSV = () => {
+      const headers = ["Asset_ID", "Name", "Source_File", "Ward", "Housing_Class", "TIV_KES", "Flood_Depth_M", "Loss_KES", "Damage_Ratio", "Risk_Tier"];
+      const rows = filtered.map((a) => [
+        a.loc_id,
+        `"${a.name || a.loc_id}"`,
+        `"${a.source_file || activeRunName || "Custom"}"`,
+        `"${a.ward}"`,
+        a.housing_class,
+        a.tiv_kes,
+        a.depth_m?.toFixed(2) || "0.00",
+        a.loss_kes || 0,
+        ((a.damage_ratio || 0) * 100).toFixed(2),
+        a.risk_level || "low",
+      ]);
+      const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+      const blob = new Blob([csvContent], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `kenya-re-exposure-${activeRunName || "portfolio"}-${Date.now()}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+    };
+
+    return (
+      <div className="space-y-4 sm:space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h1 className="text-xl sm:text-2xl font-bold text-[#00264D] flex items-center gap-2">
+              <Building2 className="size-6 text-[#00264D]" />
+              <span>Exposure Portfolio</span>
+            </h1>
+            <p className="text-xs sm:text-sm text-slate-600">
+              Showing {filtered.length} of {customAssets.length} assets · <strong>{activeRunName || "Dedicated Run"}</strong>
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-bold px-2.5 py-1 rounded-md bg-emerald-100 text-emerald-800">
+              TIV: {formatKES(totalTiv)}
+            </span>
+            <span className="text-xs font-bold px-2.5 py-1 rounded-md bg-red-100 text-red-800">
+              Loss: {formatKES(totalLoss)}
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleExportCSV}
+              className="text-xs h-7 gap-1 font-semibold text-slate-700 cursor-pointer"
+            >
+              <Download className="size-3 text-[#D21245]" />
+              Export CSV
+            </Button>
+          </div>
+        </div>
+
+        {/* Filter Toolbar */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search asset name, ID, or ward..."
+            className="flex-1 text-xs bg-white border border-slate-300 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#00264D]"
+          />
+
+          {availableFiles.length > 1 && (
+            <select
+              value={fileFilter}
+              onChange={(e) => setFileFilter(e.target.value)}
+              className="text-xs bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-medium text-slate-800 cursor-pointer focus:outline-none"
+            >
+              <option value="all">📁 All Files ({availableFiles.length})</option>
+              {availableFiles.map((file) => (
+                <option key={file} value={file}>
+                  📄 {file}
+                </option>
+              ))}
+            </select>
+          )}
+
+          <select
+            value={classFilter}
+            onChange={(e) => setClassFilter(e.target.value)}
+            className="text-xs bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-medium text-slate-800 cursor-pointer focus:outline-none"
+          >
+            <option value="all">All Typologies</option>
+            <option value="concrete_rcc">Concrete RCC</option>
+            <option value="permanent_masonry">Permanent Masonry</option>
+            <option value="informal_iron_sheet">Informal Iron Sheet</option>
+            <option value="informal_timber">Informal Timber</option>
+            <option value="semi_permanent">Semi-Permanent</option>
+          </select>
+
+          <select
+            value={tierFilter}
+            onChange={(e) => setTierFilter(e.target.value)}
+            className="text-xs bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-medium text-slate-800 cursor-pointer focus:outline-none"
+          >
+            <option value="all">All Risk Tiers</option>
+            <option value="high">🔴 High Tier</option>
+            <option value="mid">🟡 Medium Tier</option>
+            <option value="low">🟢 Low Tier</option>
+          </select>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white p-3.5 sm:p-6 shadow-xs overflow-x-auto">
+          <table className="w-full text-xs sm:text-sm min-w-[760px]">
+            <thead>
+              <tr className="border-b border-slate-200 text-slate-700 font-semibold">
+                <th className="text-left py-2.5">Asset ID & Name</th>
+                <th className="text-left py-2.5">Source / File</th>
+                <th className="text-left py-2.5">Locality</th>
+                <th className="text-left py-2.5">Typology</th>
+                <th className="text-right py-2.5">TIV Exposure</th>
+                <th className="text-right py-2.5">Water Depth</th>
+                <th className="text-right py-2.5">Damage %</th>
+                <th className="text-right py-2.5">Modeled Loss</th>
+                <th className="text-center py-2.5">Risk Tier</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filtered.map((asset) => (
+                <tr
+                  key={asset.loc_id}
+                  onClick={() => onInspectAsset?.(asset)}
+                  className="hover:bg-blue-50/50 cursor-pointer transition"
+                  title={`Click to inspect ${asset.loc_id} full dossier`}
+                >
+                  <td className="py-2.5 font-semibold text-slate-900">
+                    <div className="flex items-center gap-1.5">
+                      <span>{asset.name || asset.loc_id}</span>
+                    </div>
+                    <div className="text-[10px] text-slate-400 font-mono">{asset.loc_id}</div>
+                  </td>
+                  <td className="py-2.5">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-blue-50 text-blue-800 border border-blue-200">
+                      📄 {asset.source_file || activeRunName || "Custom"}
+                    </span>
+                  </td>
+                  <td className="py-2.5 text-slate-600">{asset.ward}</td>
+                  <td className="py-2.5">
+                    <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-700 capitalize">
+                      {CLASS_LABEL[asset.housing_class] || asset.housing_class}
+                    </span>
+                  </td>
+                  <td className="py-2.5 font-mono text-right font-semibold text-[#00264D]">
+                    {formatKES(asset.tiv_kes)}
+                  </td>
+                  <td className="py-2.5 font-mono text-right font-bold text-red-600">
+                    {asset.depth_m?.toFixed(2) || "0.00"} m
+                  </td>
+                  <td className="py-2.5 font-mono text-right text-slate-700">
+                    {((asset.damage_ratio || 0) * 100).toFixed(1)}%
+                  </td>
+                  <td className="py-2.5 font-mono text-right font-bold text-slate-900">
+                    {formatKES(asset.loss_kes || 0)}
+                  </td>
+                  <td className="py-2.5 text-center">
+                    <div className="flex items-center justify-center gap-1">
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                          asset.risk_level === "high"
+                            ? "bg-red-100 text-red-700 border border-red-200"
+                            : asset.risk_level === "mid"
+                            ? "bg-amber-100 text-amber-700 border border-amber-200"
+                            : "bg-emerald-100 text-emerald-700 border border-emerald-200"
+                        }`}
+                      >
+                        {asset.risk_level === "high" ? "High" : asset.risk_level === "mid" ? "Medium" : "Low"}
+                      </span>
+                      {onInspectAsset && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onInspectAsset(asset);
+                          }}
+                          className="h-6 text-[10px] text-[#00264D] hover:bg-white px-1.5 cursor-pointer hidden sm:inline-flex"
+                        >
+                          Inspect →
+                        </Button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4 sm:space-y-6">
       <div>
         <h1 className="text-xl sm:text-2xl font-bold text-[#00264D]">Exposure Portfolio</h1>
         <p className="text-xs sm:text-sm text-slate-600">
-          600 geocoded baseline assets · Nairobi County · Searchable & Filterable
+          600 geocoded baseline assets · Nairobi County · Searchable & Filterable · Click any asset to inspect
         </p>
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white p-3.5 sm:p-6 shadow-xs">
-        <PropertyTable rp={rp} />
+        <PropertyTable rp={rp} onSelectAsset={onInspectAsset} />
       </div>
     </div>
   );
@@ -816,7 +1720,13 @@ function LossPanel({
   );
 }
 
-function AIPanel({ scenario }: { scenario: RP }) {
+function AIPanel({
+  scenario,
+  summary,
+}: {
+  scenario: RP;
+  summary?: PortfolioSummary | null;
+}) {
   return (
     <div className="space-y-4 sm:space-y-6">
       <div>
@@ -828,7 +1738,11 @@ function AIPanel({ scenario }: { scenario: RP }) {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         <div className="rounded-xl border border-slate-200 bg-white p-3.5 sm:p-6 shadow-xs">
-          <RiskBriefing scenario={scenario} />
+          <RiskBriefing
+            scenario={scenario}
+            portfolioLossKes={summary?.event_loss_kes}
+            lossRatio={summary?.loss_ratio}
+          />
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-white p-3.5 sm:p-6 shadow-xs">
@@ -901,6 +1815,614 @@ function AssumptionsPanel() {
               <li>AAL calculations use continuous numerical trapezoidal integration across return periods 5y to 100y.</li>
             </ul>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReportsPanel({
+  scenario,
+  summary,
+  assets,
+  activeRunName,
+  runs = [],
+  activeRunId = "baseline",
+  onSelectRun,
+}: {
+  scenario: RP;
+  summary: PortfolioSummary | null;
+  assets?: ExposureAsset[];
+  activeRunName: string;
+  runs?: DatasetRun[];
+  activeRunId?: string;
+  onSelectRun?: (id: string) => void;
+}) {
+  const [reportTab, setReportTab] = useState<"memorandum" | "quote" | "portfolio">("memorandum");
+  const [isExportingPortfolio, setIsExportingPortfolio] = useState(false);
+  const [reportScope, setReportScope] = useState<string>(activeRunId || "all");
+
+  useEffect(() => {
+    if (activeRunId) setReportScope(activeRunId);
+  }, [activeRunId]);
+
+  const currentScopeRun = runs.find((r) => r.id === reportScope);
+  const isScopeConsolidated = reportScope === "all";
+
+  const scopedAssets = useMemo(() => {
+    if (isScopeConsolidated) {
+      if (runs.length > 0) return runs.flatMap((r) => r.assets);
+      return assets || [];
+    }
+    if (reportScope === "baseline") {
+      return (assets || []).filter((a) => !a.dataset_id);
+    }
+    if (currentScopeRun) {
+      return currentScopeRun.assets;
+    }
+    return assets || [];
+  }, [reportScope, isScopeConsolidated, currentScopeRun, runs, assets]);
+
+  const scopedTiv = useMemo(() => {
+    if (isScopeConsolidated) {
+      return runs.length > 0
+        ? runs.reduce((acc, r) => acc + (r.summary?.tiv_kes || r.totalTivKes || 0), 0)
+        : summary?.tiv_kes ?? 0;
+    }
+    if (currentScopeRun) {
+      return currentScopeRun.summary?.tiv_kes || currentScopeRun.totalTivKes || 0;
+    }
+    return summary?.tiv_kes ?? 0;
+  }, [isScopeConsolidated, currentScopeRun, runs, summary]);
+
+  const scopedLoss = useMemo(() => {
+    if (isScopeConsolidated) {
+      return runs.length > 0
+        ? runs.reduce((acc, r) => acc + (r.summary?.event_loss_kes || 0), 0)
+        : summary?.event_loss_kes ?? 0;
+    }
+    if (currentScopeRun) {
+      return currentScopeRun.summary?.event_loss_kes ?? 0;
+    }
+    return summary?.event_loss_kes ?? 0;
+  }, [isScopeConsolidated, currentScopeRun, runs, summary]);
+
+  const scopedLossRatio = scopedTiv > 0 ? (scopedLoss / scopedTiv) * 100 : 0;
+
+  const scopeTitle = isScopeConsolidated
+    ? `Consolidated Portfolio (${runs.length} Records)`
+    : currentScopeRun
+    ? currentScopeRun.name
+    : "Nairobi Baseline 600";
+
+  const handleExportPortfolio = async () => {
+    if (!scopedAssets || scopedAssets.length === 0) {
+      toast.error("No asset data available to export");
+      return;
+    }
+    setIsExportingPortfolio(true);
+    try {
+      await exportExposurePortfolioPDF(scopedAssets, scopeTitle, scopedTiv);
+      toast.success("Portfolio Exposure Schedule PDF downloaded!");
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to generate portfolio PDF");
+    } finally {
+      setIsExportingPortfolio(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4 sm:space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-bold text-[#00264D] flex items-center gap-2">
+            <FileText className="size-6 text-[#D21245]" />
+            Official Kenya Re Reports & Slips
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-600">
+            Export legally compliant underwriting memoranda, facultative pricing slips, and portfolio schedules with official Kenya Re letterhead.
+          </p>
+        </div>
+
+        {/* Dataset Scope Selector */}
+        <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-1.5 shadow-2xs self-start sm:self-auto">
+          <span className="text-[11px] font-semibold text-slate-500 pl-1.5">Scope:</span>
+          <select
+            value={reportScope}
+            onChange={(e) => {
+              const val = e.target.value;
+              setReportScope(val);
+              if (onSelectRun) onSelectRun(val);
+            }}
+            className="text-xs bg-slate-50 border border-slate-300 rounded px-2.5 py-1 font-semibold text-[#00264D] cursor-pointer focus:outline-none max-w-[210px] truncate"
+          >
+            {runs.length > 1 && (
+              <option value="all">🌐 Consolidated ({runs.length} Files)</option>
+            )}
+            {runs.map((r) => (
+              <option key={r.id} value={r.id}>
+                📄 {r.fileName || r.name} ({r.assetCount})
+              </option>
+            ))}
+            <option value="baseline">🏛️ Nairobi 600 Baseline</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Report Sub-Tabs */}
+      <div className="flex border-b border-slate-200 gap-2 sm:gap-4 overflow-x-auto">
+        <button
+          onClick={() => setReportTab("memorandum")}
+          className={`pb-2.5 px-3 text-xs sm:text-sm font-semibold transition-colors cursor-pointer border-b-2 whitespace-nowrap ${
+            reportTab === "memorandum"
+              ? "border-[#D21245] text-[#D21245]"
+              : "border-transparent text-slate-500 hover:text-slate-800"
+          }`}
+        >
+          1. Executive Memorandum (AI)
+        </button>
+        <button
+          onClick={() => setReportTab("quote")}
+          className={`pb-2.5 px-3 text-xs sm:text-sm font-semibold transition-colors cursor-pointer border-b-2 whitespace-nowrap ${
+            reportTab === "quote"
+              ? "border-[#D21245] text-[#D21245]"
+              : "border-transparent text-slate-500 hover:text-slate-800"
+          }`}
+        >
+          2. Facultative Quote Slip
+        </button>
+        <button
+          onClick={() => setReportTab("portfolio")}
+          className={`pb-2.5 px-3 text-xs sm:text-sm font-semibold transition-colors cursor-pointer border-b-2 whitespace-nowrap ${
+            reportTab === "portfolio"
+              ? "border-[#D21245] text-[#D21245]"
+              : "border-transparent text-slate-500 hover:text-slate-800"
+          }`}
+        >
+          3. Portfolio Schedule PDF
+        </button>
+      </div>
+
+      {/* Tab 1: Executive Memorandum */}
+      {reportTab === "memorandum" && (
+        <div className="rounded-xl border border-slate-200 bg-white p-3.5 sm:p-6 shadow-xs">
+          <RiskBriefing
+            scenario={scenario}
+            portfolioLossKes={scopedLoss}
+            lossRatio={scopedLossRatio}
+            datasetId={reportScope}
+            datasetName={scopeTitle}
+          />
+        </div>
+      )}
+
+      {/* Tab 2: Facultative Quote Slip */}
+      {reportTab === "quote" && (
+        <div className="rounded-xl border border-slate-200 bg-white p-3.5 sm:p-6 shadow-xs">
+          <QuoteGenerator />
+        </div>
+      )}
+
+      {/* Tab 3: Portfolio Exposure Schedule */}
+      {reportTab === "portfolio" && (
+        <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-6 shadow-xs space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <h3 className="text-base font-bold text-[#00264D]">Active Portfolio Asset Schedule</h3>
+              <p className="text-xs text-slate-600">
+                Detailed listing of {scopedAssets?.length ?? 0} assets for {scopeTitle} with geolocations, TIV valuations, and housing classifications.
+              </p>
+            </div>
+            <Button
+              onClick={handleExportPortfolio}
+              disabled={isExportingPortfolio || !scopedAssets || scopedAssets.length === 0}
+              className="bg-[#00264D] hover:bg-[#001c38] text-white gap-2 font-medium self-start sm:self-auto cursor-pointer"
+            >
+              {isExportingPortfolio ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Generating PDF...
+                </>
+              ) : (
+                <>
+                  <FileDown className="size-4 text-[#D21245]" />
+                  Download Schedule PDF
+                </>
+              )}
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 py-2">
+            <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+              <span className="text-[11px] text-slate-500 font-medium">Dataset Scope</span>
+              <div className="text-sm font-bold text-slate-900 truncate">{scopeTitle}</div>
+            </div>
+            <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+              <span className="text-[11px] text-slate-500 font-medium">Asset Count</span>
+              <div className="text-sm font-bold text-slate-900">{scopedAssets?.length ?? 0}</div>
+            </div>
+            <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+              <span className="text-[11px] text-slate-500 font-medium">Total Insured Value</span>
+              <div className="text-sm font-bold text-slate-900">{formatKES(scopedTiv)}</div>
+            </div>
+            <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+              <span className="text-[11px] text-slate-500 font-medium">Average Asset TIV</span>
+              <div className="text-sm font-bold text-slate-900">
+                {scopedAssets && scopedAssets.length > 0
+                  ? formatKES(scopedTiv / scopedAssets.length)
+                  : "KES 0"}
+              </div>
+            </div>
+          </div>
+
+          {/* Quick preview table */}
+          <div className="max-h-80 overflow-y-auto border border-slate-200 rounded-lg">
+            <table className="w-full text-left text-xs">
+              <thead className="sticky top-0 bg-slate-100 border-b border-slate-200 font-semibold text-slate-700">
+                <tr>
+                  <th className="p-2.5">Asset ID</th>
+                  <th className="p-2.5">Housing Class</th>
+                  <th className="p-2.5 text-right">TIV (KES)</th>
+                  <th className="p-2.5">Latitude</th>
+                  <th className="p-2.5">Longitude</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {(scopedAssets || []).slice(0, 30).map((a, idx) => (
+                  <tr key={a.loc_id || a.id || idx} className="hover:bg-slate-50">
+                    <td className="p-2.5 font-mono text-slate-800">{a.loc_id || a.id || `Asset-${idx + 1}`}</td>
+                    <td className="p-2.5 capitalize">{a.housing_class.replace(/_/g, " ")}</td>
+                    <td className="p-2.5 text-right font-medium text-slate-900">{formatKES(a.tiv_kes)}</td>
+                    <td className="p-2.5 font-mono text-slate-600">{a.lat.toFixed(4)}</td>
+                    <td className="p-2.5 font-mono text-slate-600">{(a.lon ?? a.lng ?? 0).toFixed(4)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {scopedAssets && scopedAssets.length > 30 && (
+            <p className="text-[11px] text-slate-500 text-center">
+              Showing first 30 of {scopedAssets.length} assets. Full schedule available in PDF export.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RepositoryPanel({
+  runs,
+  activeRunId,
+  scenario,
+  onSelectRun,
+  onRenameRun,
+  onDeleteRun,
+  onDownloadCSV,
+  onOpenIngestModal,
+}: {
+  runs: DatasetRun[];
+  activeRunId: string;
+  scenario: RP;
+  onSelectRun: (id: string) => void;
+  onRenameRun: (id: string, name: string) => void;
+  onDeleteRun: (id: string) => void;
+  onDownloadCSV: (run: DatasetRun) => void;
+  onOpenIngestModal: () => void;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [search, setSearch] = useState("");
+
+  const handleStartEdit = (run: DatasetRun) => {
+    setEditingId(run.id);
+    setEditName(run.name);
+  };
+
+  const handleSaveEdit = (runId: string) => {
+    if (editName.trim()) {
+      onRenameRun(runId, editName.trim());
+    }
+    setEditingId(null);
+  };
+
+  const filtered = runs.filter(
+    (r) =>
+      r.name.toLowerCase().includes(search.toLowerCase()) ||
+      (r.fileName && r.fileName.toLowerCase().includes(search.toLowerCase()))
+  );
+
+  const totalAssets = runs.reduce((acc, r) => acc + r.assetCount, 0);
+  const totalTiv = runs.reduce((acc, r) => acc + r.totalTivKes, 0);
+
+  return (
+    <div className="space-y-4 sm:space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-bold text-[#00264D] flex items-center gap-2">
+            <FolderArchive className="size-6 text-[#00264D]" />
+            <span>Dataset Repository & File Manager</span>
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-600">
+            View stored exposure files, inspect upload timestamps, rename datasets, download CSV schedules, and toggle active simulation scopes.
+          </p>
+        </div>
+        <Button
+          onClick={onOpenIngestModal}
+          className="bg-[#00264D] hover:bg-[#001830] text-white text-xs font-semibold gap-2 self-start sm:self-auto cursor-pointer"
+        >
+          <UploadCloud className="size-4 text-white" />
+          Upload File
+        </Button>
+      </div>
+
+      {/* KPI Stats */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
+          <div className="text-[10px] font-semibold uppercase text-slate-500">Datasets Saved</div>
+          <div className="mt-1 text-xl font-bold font-mono text-[#00264D]">{runs.length + 1} Records</div>
+          <div className="text-[11px] text-slate-500">{runs.length} Custom + 1 Baseline</div>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
+          <div className="text-[10px] font-semibold uppercase text-slate-500">Total Uploaded Assets</div>
+          <div className="mt-1 text-xl font-bold font-mono text-slate-900">{totalAssets.toLocaleString()} Units</div>
+          <div className="text-[11px] text-slate-500">Across {runs.length} custom files</div>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
+          <div className="text-[10px] font-semibold uppercase text-slate-500">Consolidated Upload TIV</div>
+          <div className="mt-1 text-xl font-bold font-mono text-emerald-700">{formatKES(totalTiv)}</div>
+          <div className="text-[11px] text-slate-500">Total Insured Value</div>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs">
+          <div className="text-[10px] font-semibold uppercase text-slate-500">Active Scope</div>
+          <div className="mt-1 text-sm font-bold truncate text-[#D21245]">
+            {activeRunId === "all"
+              ? "🌐 Consolidated (All Files)"
+              : activeRunId === "baseline"
+              ? "📁 Nairobi 600 Baseline"
+              : runs.find((r) => r.id === activeRunId)?.name || activeRunId}
+          </div>
+          <div className="text-[11px] text-slate-500">Driving current dashboard</div>
+        </div>
+      </div>
+
+      {/* Repository Table Card */}
+      <div className="rounded-xl border border-slate-200 bg-white shadow-xs overflow-hidden">
+        <div className="p-3.5 sm:p-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/60">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-slate-800">Saved Exposure Files</span>
+            <span className="text-[10px] bg-slate-200 text-slate-700 font-semibold px-2 py-0.5 rounded-full">
+              {runs.length + 1}
+            </span>
+          </div>
+          <div className="w-full sm:w-64">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search datasets..."
+              className="w-full text-xs bg-white border border-slate-300 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#00264D]"
+            />
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs text-left min-w-[800px]">
+            <thead className="bg-slate-100/80 border-b border-slate-200 text-slate-700 font-semibold">
+              <tr>
+                <th className="p-3">Status</th>
+                <th className="p-3">Dataset Name & File</th>
+                <th className="p-3">Upload Time</th>
+                <th className="p-3">Source Engine</th>
+                <th className="p-3 text-right">Assets</th>
+                <th className="p-3 text-right">Total TIV</th>
+                <th className="p-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {/* Baseline Row */}
+              <tr className={`hover:bg-slate-50 transition ${activeRunId === "baseline" ? "bg-blue-50/40" : ""}`}>
+                <td className="p-3">
+                  {activeRunId === "baseline" ? (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                      <Check className="size-3" /> Active
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-slate-400 font-medium">Inactive</span>
+                  )}
+                </td>
+                <td className="p-3">
+                  <div className="font-bold text-slate-900">Nairobi 600 Baseline Exposure</div>
+                  <div className="text-[11px] text-slate-500 font-mono">nairobi_baseline_600.oed.csv</div>
+                </td>
+                <td className="p-3 text-slate-500">System Built-In</td>
+                <td className="p-3">
+                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700">
+                    Oasis OED / OSM
+                  </span>
+                </td>
+                <td className="p-3 text-right font-mono font-semibold text-slate-800">600</td>
+                <td className="p-3 text-right font-mono font-semibold text-[#00264D]">KES 63.64B</td>
+                <td className="p-3 text-right">
+                  <div className="flex items-center justify-end gap-1.5">
+                    {activeRunId !== "baseline" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onSelectRun("baseline")}
+                        className="h-7 text-[11px] px-2.5 font-semibold text-[#00264D] hover:bg-slate-100 cursor-pointer"
+                      >
+                        Activate & View
+                      </Button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+
+              {/* Consolidated Multi-file Row if > 1 runs */}
+              {runs.length > 1 && (
+                <tr className={`hover:bg-slate-50 transition ${activeRunId === "all" ? "bg-blue-50/40" : ""}`}>
+                  <td className="p-3">
+                    {activeRunId === "all" ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                        <Check className="size-3" /> Active
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-slate-400 font-medium">Inactive</span>
+                    )}
+                  </td>
+                  <td className="p-3">
+                    <div className="font-bold text-[#00264D] flex items-center gap-1.5">
+                      <Globe className="size-3.5 text-blue-600" />
+                      Consolidated Portfolio (All {runs.length} Uploads)
+                    </div>
+                    <div className="text-[11px] text-slate-500">Multi-region combined aggregation</div>
+                  </td>
+                  <td className="p-3 text-slate-500">Dynamic Live</td>
+                  <td className="p-3">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-100 text-blue-800">
+                      Consolidated
+                    </span>
+                  </td>
+                  <td className="p-3 text-right font-mono font-semibold text-slate-800">{totalAssets}</td>
+                  <td className="p-3 text-right font-mono font-semibold text-[#00264D]">{formatKES(totalTiv)}</td>
+                  <td className="p-3 text-right">
+                    <div className="flex items-center justify-end gap-1.5">
+                      {activeRunId !== "all" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => onSelectRun("all")}
+                          className="h-7 text-[11px] px-2.5 font-semibold text-[#00264D] hover:bg-slate-100 cursor-pointer"
+                        >
+                          Activate & View
+                        </Button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              )}
+
+              {/* Uploaded Runs */}
+              {filtered.map((run) => (
+                <tr
+                  key={run.id}
+                  className={`hover:bg-slate-50 transition ${activeRunId === run.id ? "bg-emerald-50/30" : ""}`}
+                >
+                  <td className="p-3">
+                    {activeRunId === run.id ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                        <Check className="size-3" /> Active
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-slate-400 font-medium">Inactive</span>
+                    )}
+                  </td>
+                  <td className="p-3">
+                    {editingId === run.id ? (
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          className="text-xs border border-[#00264D] rounded px-2 py-1 font-semibold text-slate-900 focus:outline-none w-48"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") handleSaveEdit(run.id);
+                            if (e.key === "Escape") setEditingId(null);
+                          }}
+                        />
+                        <button
+                          onClick={() => handleSaveEdit(run.id)}
+                          className="p-1 rounded text-emerald-700 hover:bg-emerald-100 cursor-pointer"
+                          title="Save Name"
+                        >
+                          <Check className="size-3.5" />
+                        </button>
+                        <button
+                          onClick={() => setEditingId(null)}
+                          className="p-1 rounded text-slate-400 hover:bg-slate-200 cursor-pointer"
+                          title="Cancel"
+                        >
+                          <X className="size-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5 group">
+                        <span className="font-bold text-slate-900">{run.name}</span>
+                        <button
+                          onClick={() => handleStartEdit(run)}
+                          className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-slate-400 hover:text-slate-700 cursor-pointer transition"
+                          title="Rename dataset"
+                        >
+                          <Edit3 className="size-3" />
+                        </button>
+                      </div>
+                    )}
+                    <div className="text-[11px] text-slate-500 font-mono">{run.fileName || "custom_upload.csv"}</div>
+                  </td>
+                  <td className="p-3 text-slate-600 font-mono text-[11px]">{run.timestamp || "Recent"}</td>
+                  <td className="p-3">
+                    <span
+                      className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold ${
+                        run.source === "file_upload"
+                          ? "bg-indigo-100 text-indigo-800"
+                          : run.source === "csv_upload"
+                          ? "bg-blue-100 text-blue-800"
+                          : run.source === "ai_slip"
+                          ? "bg-purple-100 text-purple-800"
+                          : "bg-amber-100 text-amber-800"
+                      }`}
+                    >
+                      {run.source === "file_upload"
+                        ? "Document Ingest (AI)"
+                        : run.source === "csv_upload"
+                        ? "CSV Dataset"
+                        : run.source === "ai_slip"
+                        ? "AI Policy Slip"
+                        : "Preset Batch"}
+                    </span>
+                  </td>
+                  <td className="p-3 text-right font-mono font-semibold text-slate-800">{run.assetCount}</td>
+                  <td className="p-3 text-right font-mono font-semibold text-[#00264D]">{formatKES(run.totalTivKes)}</td>
+                  <td className="p-3 text-right">
+                    <div className="flex items-center justify-end gap-1.5">
+                      {activeRunId !== run.id && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => onSelectRun(run.id)}
+                          className="h-7 text-[11px] px-2.5 font-semibold text-[#00264D] hover:bg-slate-100 cursor-pointer"
+                        >
+                          Activate
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onDownloadCSV(run)}
+                        className="h-7 text-[11px] px-2 text-slate-700 hover:bg-slate-100 cursor-pointer"
+                        title="Download CSV"
+                      >
+                        <Download className="size-3 text-[#D21245]" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onDeleteRun(run.id)}
+                        className="h-7 text-[11px] px-2 text-red-600 hover:bg-red-50 hover:border-red-200 cursor-pointer"
+                        title="Delete dataset"
+                      >
+                        <Trash2 className="size-3" />
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

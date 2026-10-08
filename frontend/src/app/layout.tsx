@@ -18,6 +18,14 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Kenya Re · CAT Risk Intelligence — Nairobi Flood Model",
   description: "AI-Powered Urban Pluvial Flood Catastrophe Model & Underwriting Platform for Kenya Re",
+  icons: {
+    icon: [
+      { url: "/image.png", type: "image/png" },
+      { url: "/icon.png", type: "image/png" },
+    ],
+    shortcut: "/image.png",
+    apple: "/image.png",
+  },
 };
 
 export default function RootLayout({

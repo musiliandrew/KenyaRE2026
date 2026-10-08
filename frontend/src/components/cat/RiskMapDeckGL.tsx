@@ -5,6 +5,8 @@ import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
   api,
+  formatKES,
+  CLASS_LABEL,
   type ExposureAsset,
   type Hotspot,
   type HousingClass,
@@ -56,14 +58,37 @@ export function RiskMapDeckGL({
   const cb = useRef({ onSelectBuilding, onSelectHotspot });
   cb.current = { onSelectBuilding, onSelectHotspot };
 
-  // Fetch real data if not provided via props
+  // Sync or fetch dynamic assets
   useEffect(() => {
-    if (propAssets && propAssets.length) {
+    if (propAssets !== undefined) {
       setAssets(propAssets);
     } else {
       api.exposureAssets(normRP, { limit: 1000 }).then((res) => setAssets(res.assets)).catch(() => {});
     }
   }, [propAssets, normRP]);
+
+  // Auto-fit MapLibre map bounds when assets list changes (e.g. fly to Mandera or Nairobi)
+  useEffect(() => {
+    if (mapRef.current && mapLoaded && assets.length > 0) {
+      try {
+        const bounds = new maplibregl.LngLatBounds();
+        let valid = 0;
+        assets.forEach((a) => {
+          const lng = (a as any).lng ?? a.lon;
+          const lat = a.lat;
+          if (typeof lng === "number" && typeof lat === "number" && !isNaN(lng) && !isNaN(lat)) {
+            bounds.extend([lng, lat]);
+            valid++;
+          }
+        });
+        if (valid > 0) {
+          mapRef.current.fitBounds(bounds, { padding: 60, maxZoom: 14.5, duration: 1200 });
+        }
+      } catch (err) {
+        console.warn("Failed to fit MapLibre bounds", err);
+      }
+    }
+  }, [assets, mapLoaded]);
 
   useEffect(() => {
     if (propHotspots && propHotspots.length) {
@@ -193,9 +218,47 @@ export function RiskMapDeckGL({
       map.on("click", "buildings-points", (e) => {
         if (e.features && e.features[0]) {
           const props = e.features[0].properties;
-          const found = assets.find((b) => b.loc_id === props?.id);
-          if (found && cb.current.onSelectBuilding) {
-            cb.current.onSelectBuilding(found);
+          const found = assets.find((b) => b.loc_id === props?.id || (b as any).id === props?.id);
+          if (found) {
+            if (cb.current.onSelectBuilding) {
+              cb.current.onSelectBuilding(found);
+            }
+
+            const lng = (found as any).lng ?? found.lon;
+            const lat = found.lat;
+            const depthVal = typeof found.depth_m === "number" ? found.depth_m.toFixed(2) : "0.00";
+            const lossVal = formatKES(found.loss_kes || 0);
+            const tivVal = formatKES(found.tiv_kes || 0);
+            const fileBadge = found.source_file
+              ? `<div style="display:inline-block;background:#EEF2F6;color:#00264D;border:1px solid #CBD5E1;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:600;margin:3px 0;">📄 ${found.source_file}</div>`
+              : "";
+            const classLabel = (CLASS_LABEL as any)[found.housing_class] || found.housing_class.replace(/_/g, " ");
+
+            new maplibregl.Popup({ offset: 12, closeButton: true })
+              .setLngLat([lng, lat])
+              .setHTML(`
+                <div style="font-family: system-ui, -apple-system, sans-serif; font-size: 12px; color: #1E293B; min-width: 210px; padding: 2px;">
+                  <div style="font-weight: 700; color: #00264D; font-size: 13px; line-height: 1.25;">${found.name || found.loc_id}</div>
+                  ${fileBadge}
+                  <div style="color: #64748B; font-size: 11px; margin-top: 2px;">Ward / Area: <strong style="color: #1E293B;">${found.ward}</strong></div>
+                  <div style="color: #64748B; font-size: 11px; margin-bottom: 6px;">Class: <strong style="color: #1E293B; text-transform: capitalize;">${classLabel}</strong></div>
+                  <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 6px; font-size: 11px;">
+                    <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
+                      <span style="color: #64748B;">TIV Exposure:</span>
+                      <strong style="color: #0F172A; font-family: monospace;">${tivVal}</strong>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
+                      <span style="color: #64748B;">Flood Depth:</span>
+                      <strong style="color: #D21245; font-family: monospace;">${depthVal} m</strong>
+                    </div>
+                    <div style="display:flex; justify-content:space-between;">
+                      <span style="color: #64748B;">Modeled Loss:</span>
+                      <strong style="color: #B91C1C; font-family: monospace;">${lossVal}</strong>
+                    </div>
+                  </div>
+                </div>
+              `)
+              .addTo(map);
           }
         }
       });

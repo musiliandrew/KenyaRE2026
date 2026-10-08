@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Calculator, Download, CheckCircle2, Loader2, FileText } from "lucide-react";
+import { Calculator, Download, CheckCircle2, Loader2, FileText, Badge } from "lucide-react";
 import { toast } from "sonner";
 import { api, formatKES, type HousingClass, type FacultativeResponse } from "@/lib/api";
 import { exportQuoteSlipPDF } from "@/lib/pdfGenerator";

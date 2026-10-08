@@ -57,12 +57,35 @@ export function RiskMap({
 
   // Sync or fetch dynamic assets & hotspots
   useEffect(() => {
-    if (propAssets && propAssets.length) {
+    if (propAssets !== undefined) {
       setAssets(propAssets);
     } else {
       api.exposureAssets(normRP, { limit: 1000 }).then((res) => setAssets(res.assets)).catch(() => {});
     }
   }, [propAssets, normRP]);
+
+  // Auto-fit map bounds when assets list changes (e.g. fly to Mandera or Nairobi)
+  useEffect(() => {
+    if (map.current && mapLoaded && assets.length > 0) {
+      try {
+        const bounds = new mapboxgl.LngLatBounds();
+        let valid = 0;
+        assets.forEach((a) => {
+          const lng = (a as any).lng ?? a.lon;
+          const lat = a.lat;
+          if (typeof lng === "number" && typeof lat === "number" && !isNaN(lng) && !isNaN(lat)) {
+            bounds.extend([lng, lat]);
+            valid++;
+          }
+        });
+        if (valid > 0) {
+          map.current.fitBounds(bounds, { padding: 60, maxZoom: 14.5, duration: 1200 });
+        }
+      } catch (err) {
+        console.warn("Failed to fit map bounds", err);
+      }
+    }
+  }, [assets, mapLoaded]);
 
   useEffect(() => {
     if (propHotspots && propHotspots.length) {
@@ -319,13 +342,58 @@ export function RiskMap({
         },
       });
 
-      // Click event on property pin
+      // Click event on property pin with rich popup & selection callback
       m.on("click", "buildings-points", (e) => {
         if (!e.features || !e.features[0]) return;
         const id = e.features[0].properties?.id;
-        const b = assets.find((item) => item.loc_id === id);
-        if (b && cb.current.onSelectBuilding) {
-          cb.current.onSelectBuilding(b);
+        const b = assets.find((item) => item.loc_id === id || (item as any).id === id);
+        if (b) {
+          if (cb.current.onSelectBuilding) {
+            cb.current.onSelectBuilding(b);
+          }
+
+          const lng = (b as any).lng ?? b.lon;
+          const lat = b.lat;
+          const depthVal = typeof b.depth_m === "number" ? b.depth_m.toFixed(2) : "0.00";
+          const lossVal = formatKES(b.loss_kes || 0);
+          const tivVal = formatKES(b.tiv_kes || 0);
+          const fileBadge = b.source_file
+            ? `<div style="display:inline-block;background:#EEF2F6;color:#00264D;border:1px solid #CBD5E1;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:600;margin:3px 0;">📄 ${b.source_file}</div>`
+            : "";
+          const classLabel = (CLASS_LABEL as any)[b.housing_class] || b.housing_class.replace(/_/g, " ");
+
+          new mapboxgl.Popup({ offset: 12, closeButton: true, className: "kenya-re-point-popup" })
+            .setLngLat([lng, lat])
+            .setHTML(`
+              <div style="font-family: system-ui, -apple-system, sans-serif; font-size: 12px; color: #1E293B; min-width: 210px; padding: 2px;">
+                <div style="font-weight: 700; color: #00264D; font-size: 13px; line-height: 1.25;">${b.name || b.loc_id}</div>
+                ${fileBadge}
+                <div style="color: #64748B; font-size: 11px; margin-top: 2px;">Ward / Area: <strong style="color: #1E293B;">${b.ward}</strong></div>
+                <div style="color: #64748B; font-size: 11px; margin-bottom: 6px;">Class: <strong style="color: #1E293B; text-transform: capitalize;">${classLabel}</strong></div>
+                <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 6px; font-size: 11px;">
+                  <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
+                    <span style="color: #64748B;">TIV Exposure:</span>
+                    <strong style="color: #0F172A; font-family: monospace;">${tivVal}</strong>
+                  </div>
+                  <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
+                    <span style="color: #64748B;">Flood Depth:</span>
+                    <strong style="color: #D21245; font-family: monospace;">${depthVal} m</strong>
+                  </div>
+                  <div style="display:flex; justify-content:space-between;">
+                    <span style="color: #64748B;">Modeled Loss:</span>
+                    <strong style="color: #B91C1C; font-family: monospace;">${lossVal}</strong>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onclick="window.dispatchEvent(new CustomEvent('kenya_re_inspect_asset', { detail: '${b.loc_id || (b as any).id}' }))"
+                  style="margin-top: 7px; width: 100%; background: #00264D; color: white; border: none; border-radius: 6px; padding: 5px 8px; font-size: 11px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);"
+                >
+                  <span>🔍 Inspect Full Dossier →</span>
+                </button>
+              </div>
+            `)
+            .addTo(m);
         }
       });
 

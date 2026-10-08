@@ -1,5 +1,7 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, File, UploadFile
 from fastapi.responses import StreamingResponse
+import io
+import csv
 from typing import List, Dict, Any, Optional
 from app.models.schemas import (
     PortfolioSummary, ReturnPeriodMetric, EPCurveResponse,
@@ -205,6 +207,211 @@ def get_exposure_assets(
 
     page = enriched[offset: offset + limit]
     return {"total": len(enriched), "offset": offset, "returned": len(page), "return_period": return_period, "assets": page}
+
+
+def build_asset_dossier_response(
+    asset_dict: Dict[str, Any],
+    active_rp: str = "100y",
+    portfolio_assets: Optional[List[Dict[str, Any]]] = None
+) -> Dict[str, Any]:
+    loc_id = str(asset_dict.get("loc_id") or asset_dict.get("id") or "NBO-ASSET").strip()
+    name = str(asset_dict.get("name") or loc_id)
+    ward = str(asset_dict.get("ward") or "Nairobi")
+    lat = float(asset_dict.get("lat") or -1.2847)
+    lon = float(asset_dict.get("lon") or asset_dict.get("lng") or 36.8247)
+    h_class = str(asset_dict.get("housing_class") or "concrete_rcc").lower().strip()
+    area_sqm = float(asset_dict.get("floor_area_m2") or asset_dict.get("area_sqm") or 1000.0)
+    tiv_kes = float(asset_dict.get("tiv_kes") or 50_000_000.0)
+
+    # 1. Housing class parameters
+    from app.services.vulnerability_engine import vulnerability_engine, HousingClass
+    hc_enum = vulnerability_engine.get_housing_class_enum(h_class)
+    params = vulnerability_engine.curves.get(hc_enum, vulnerability_engine.curves[HousingClass.concrete_rcc])
+
+    # 2. Discrete Vulnerability Curve for this asset's housing class (0 to 4.5m)
+    curve_points = vulnerability_engine.generate_curve_points(hc_enum, max_depth_m=4.5, step_m=0.1)
+
+    # 3. Multi-return-period hazard depths, damage ratios, and losses (5y, 10y, 25y, 50y, 100y)
+    from app.services.hazard_engine import hazard_engine, HAZARD_TIER_CONFIG
+    rp_metrics = []
+    override_depth = asset_dict.get("depth_m")
+
+    for rp_key, rp_cfg in HAZARD_TIER_CONFIG.items():
+        if override_depth is not None and float(override_depth) >= 0:
+            anchor_active = HAZARD_TIER_CONFIG.get(active_rp, {}).get("depth_anchor_m", 2.2)
+            ratio = rp_cfg.get("depth_anchor_m", 1.0) / (anchor_active if anchor_active > 0 else 1.0)
+            d_m = max(0.0, float(override_depth) * ratio)
+        else:
+            h_sample = hazard_engine.get_hazard_depth(lat, lon, rp_key)
+            d_m = float(h_sample.get("depth_m", 0.0))
+
+        dr = vulnerability_engine.calculate_damage_ratio(d_m, hc_enum)
+        loss = tiv_kes * dr
+        deductible_pct = 0.10
+        deductible_kes = min(loss, tiv_kes * deductible_pct)
+        insured_loss = max(0.0, loss - deductible_kes)
+
+        rp_metrics.append({
+            "return_period": rp_key,
+            "years": rp_cfg["rp_years"],
+            "annual_exceedance_prob": rp_cfg["annual_exceedance_prob"],
+            "label": rp_cfg["label"],
+            "depth_m": round(d_m, 2),
+            "damage_ratio": round(dr, 4),
+            "damage_ratio_pct": round(dr * 100, 2),
+            "loss_kes": round(loss, 2),
+            "deductible_kes": round(deductible_kes, 2),
+            "insured_loss_kes": round(insured_loss, 2),
+        })
+
+    rp_metrics.sort(key=lambda x: x["years"])
+
+    # 4. Integrate Asset AAL (Annual Average Loss)
+    aal_gross_kes = 0.0
+    for i in range(len(rp_metrics) - 1):
+        p1 = rp_metrics[i]["annual_exceedance_prob"]
+        p2 = rp_metrics[i + 1]["annual_exceedance_prob"]
+        l1 = rp_metrics[i]["loss_kes"]
+        l2 = rp_metrics[i + 1]["loss_kes"]
+        delta_p = abs(p1 - p2)
+        aal_gross_kes += ((l1 + l2) / 2.0) * delta_p
+    if rp_metrics:
+        aal_gross_kes += rp_metrics[-1]["loss_kes"] * rp_metrics[-1]["annual_exceedance_prob"] * 0.5
+
+    pure_risk_rate_pct = (aal_gross_kes / tiv_kes * 100.0) if tiv_kes > 0 else 0.0
+
+    active_metric = next((m for m in rp_metrics if m["return_period"] == active_rp), rp_metrics[-1])
+    active_depth = active_metric["depth_m"]
+    active_damage_ratio = active_metric["damage_ratio"]
+    active_loss = active_metric["loss_kes"]
+    risk_level = "high" if active_damage_ratio > 0.35 else "mid" if active_damage_ratio > 0.08 else "low"
+
+    # 5. Exposure Portfolio Context & Neighbors
+    from app.services.exposure_engine import exposure_engine
+    pool = portfolio_assets if portfolio_assets is not None else exposure_engine.assets
+    total_portfolio_tiv = sum(a.get("tiv_kes", 0) for a in pool) or tiv_kes
+    total_portfolio_loss = sum(a.get("loss_kes", 0) for a in pool) or active_loss
+
+    tiv_share_pct = (tiv_kes / total_portfolio_tiv * 100.0) if total_portfolio_tiv > 0 else 0.0
+    loss_share_pct = (active_loss / total_portfolio_loss * 100.0) if total_portfolio_loss > 0 else 0.0
+
+    # Neighbors in same ward
+    ward_assets = [
+        a for a in pool
+        if (a.get("ward") or "").lower() == ward.lower()
+        and str(a.get("loc_id") or a.get("id") or "").lower() != loc_id.lower()
+    ]
+    ward_assets.sort(key=lambda a: a.get("loss_kes", 0) or a.get("tiv_kes", 0), reverse=True)
+    top_neighbors = ward_assets[:6]
+
+    return {
+        "asset": {
+            "loc_id": loc_id,
+            "name": name,
+            "ward": ward,
+            "lat": lat,
+            "lon": lon,
+            "housing_class": hc_enum.value,
+            "housing_class_label": params["label"],
+            "floor_area_m2": area_sqm,
+            "tiv_kes": tiv_kes,
+            "depth_m": active_depth,
+            "damage_ratio": active_damage_ratio,
+            "damage_ratio_pct": round(active_damage_ratio * 100, 2),
+            "loss_kes": active_loss,
+            "risk_level": risk_level,
+            "active_rp": active_rp,
+            "source_file": asset_dict.get("source_file"),
+        },
+        "financial_summary": {
+            "tiv_kes": tiv_kes,
+            "active_loss_kes": active_loss,
+            "damage_ratio_pct": round(active_damage_ratio * 100, 2),
+            "aal_gross_kes": round(aal_gross_kes, 2),
+            "pure_risk_rate_pct": round(pure_risk_rate_pct, 4),
+            "recommended_premium_kes": round(aal_gross_kes * 1.32, 2),
+            "recommended_deductible_pct": 10.0,
+            "tiv_share_pct": round(tiv_share_pct, 4),
+            "loss_share_pct": round(loss_share_pct, 4),
+        },
+        "exceedance_probability_curve": rp_metrics,
+        "vulnerability_curve": {
+            "housing_class": hc_enum.value,
+            "label": params["label"],
+            "parameters": {
+                "cap": params["cap"],
+                "cap_pct": round(params["cap"] * 100, 1),
+                "k": params["k"],
+                "midpoint": params["midpoint"],
+                "threshold_m": params["threshold_m"],
+                "jrc_reference": params["jrc_reference"],
+                "typical_costs_sqm": params["typical_costs_sqm"],
+                "description": params["description"],
+            },
+            "points": curve_points,
+            "active_operating_point": {
+                "depth_m": active_depth,
+                "damage_ratio": active_damage_ratio,
+                "damage_ratio_pct": round(active_damage_ratio * 100, 2),
+            }
+        },
+        "top_exposed_locations": [
+            {
+                "loc_id": a.get("loc_id") or a.get("id"),
+                "name": a.get("name") or a.get("loc_id"),
+                "ward": a.get("ward"),
+                "housing_class": a.get("housing_class"),
+                "tiv_kes": a.get("tiv_kes"),
+                "depth_m": a.get("depth_m", 0.0),
+                "loss_kes": a.get("loss_kes", 0.0),
+                "damage_ratio": a.get("damage_ratio", 0.0),
+            }
+            for a in top_neighbors
+        ]
+    }
+
+
+@router.get("/exposure/asset/{loc_id}", tags=["Pillar 3: Exposure"])
+def get_single_asset_dossier(loc_id: str, return_period: str = "100y") -> Dict[str, Any]:
+    """
+    Returns complete single-asset catastrophe dossier including JRC vulnerability curve,
+    calibrated parameters, loss & exceedance probability curve, damage ratio, and top exposed neighbors.
+    Matches IDs flexibly (e.g. nbo0023, NBO-0023, UH-001).
+    """
+    clean_id = loc_id.strip().upper().replace(" ", "").replace("_", "-")
+    found = None
+    for a in exposure_engine.assets:
+        aid = str(a.get("loc_id") or a.get("id") or "").upper().replace(" ", "").replace("_", "-")
+        if aid == clean_id or aid.replace("-", "") == clean_id.replace("-", ""):
+            found = a
+            break
+
+    if not found:
+        # Fallback search by partial containment
+        for a in exposure_engine.assets:
+            aid = str(a.get("loc_id") or a.get("id") or "").upper()
+            if clean_id in aid or aid in clean_id:
+                found = a
+                break
+
+    if not found:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Asset ID '{loc_id}' not found in baseline portfolio. Please provide asset data via POST /api/exposure/asset/dossier"
+        )
+
+    return build_asset_dossier_response(found, active_rp=return_period)
+
+
+@router.post("/exposure/asset/dossier", tags=["Pillar 3: Exposure"])
+def calculate_asset_dossier(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Calculates complete single-asset catastrophe dossier for any arbitrary or uploaded asset.
+    """
+    asset = payload.get("asset") or payload
+    active_rp = str(payload.get("return_period") or asset.get("active_rp") or "100y")
+    portfolio_assets = payload.get("portfolio_assets")
+    return build_asset_dossier_response(asset, active_rp=active_rp, portfolio_assets=portfolio_assets)
 
 
 @router.get("/hazard/grid", tags=["Pillar 1: Hazard"])
@@ -463,4 +670,169 @@ def chat_stream(req: AIChatRequest):
             yield token
 
     return StreamingResponse(event_generator(), media_type="text/plain")
+
+
+def extract_text_from_file(filename: str, content: bytes) -> str:
+    """
+    Extracts plain text from unstructured files (.docx, .pdf, .txt, .md, .csv).
+    """
+    ext = filename.lower().split(".")[-1] if "." in filename else ""
+
+    if ext == "pdf":
+        try:
+            import pypdf
+            reader = pypdf.PdfReader(io.BytesIO(content))
+            pages = [page.extract_text() or "" for page in reader.pages]
+            return "\n".join(pages).strip()
+        except Exception as e:
+            return content.decode("utf-8", errors="ignore")
+
+    elif ext in ("docx", "doc"):
+        try:
+            import docx
+            doc = docx.Document(io.BytesIO(content))
+            parts = [p.text for p in doc.paragraphs if p.text.strip()]
+            for table in doc.tables:
+                for row in table.rows:
+                    cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+                    if cells:
+                        parts.append(" | ".join(cells))
+            return "\n".join(parts).strip()
+        except Exception:
+            try:
+                import zipfile
+                import xml.etree.ElementTree as ET
+                with zipfile.ZipFile(io.BytesIO(content)) as z:
+                    xml_content = z.read("word/document.xml")
+                    tree = ET.fromstring(xml_content)
+                    return " ".join(node.text for node in tree.iter() if node.text).strip()
+            except Exception:
+                return content.decode("utf-8", errors="ignore")
+
+    else:
+        try:
+            return content.decode("utf-8")
+        except UnicodeDecodeError:
+            return content.decode("latin-1", errors="ignore")
+
+
+@router.post("/ai/ingest-file", tags=["AI Intelligence Layer"])
+async def ingest_unstructured_file(file: UploadFile = File(...)):
+    """
+    Ingests unstructured data files (.docx, .pdf, .txt, .csv, .json, etc.)
+    Extracts text and runs AI NLP parsing to extract geocoded CAT portfolio assets.
+    """
+    content = await file.read()
+    filename = file.filename or "uploaded_file"
+    ext = filename.lower().split(".")[-1] if "." in filename else ""
+
+    # 1. If it's a structured CSV with standard tabular exposure columns, try tabular parse first
+    if ext == "csv":
+        try:
+            text = content.decode("utf-8")
+            lines = [l.strip() for l in text.split("\n") if l.strip()]
+            if len(lines) > 1:
+                headers = [h.strip().lower() for h in lines[0].split(",")]
+                has_lat = any("lat" in h for h in headers)
+                has_lon = any("lon" in h or "lng" in h for h in headers)
+                has_tiv = any("tiv" in h or "value" in h for h in headers)
+                if has_lat and has_lon and has_tiv:
+                    reader = csv.DictReader(lines)
+                    items = []
+                    for i, row in enumerate(reader, 1):
+                        row_lower = {k.lower().strip(): v.strip() for k, v in row.items() if k}
+                        lat = float(row_lower.get("lat", -1.2921) or -1.2921)
+                        lon = float(row_lower.get("lon", row_lower.get("lng", 36.8219)) or 36.8219)
+                        tiv = float(row_lower.get("tiv_kes", row_lower.get("tiv", row_lower.get("value", 50000000))) or 50000000)
+                        raw_class = row_lower.get("housing_class", row_lower.get("class", "concrete_rcc"))
+                        h_class = (
+                            "informal_iron_sheet" if "iron" in raw_class
+                            else "semi_permanent" if "semi" in raw_class
+                            else "permanent_masonry" if "masonry" in raw_class
+                            else "concrete_rcc"
+                        )
+                        name = row_lower.get("name", row_lower.get("building", f"Asset #{i}"))
+                        ward = row_lower.get("ward", row_lower.get("locality", "Nairobi"))
+                        area = float(row_lower.get("area_sqm", row_lower.get("area", 1000)) or 1000)
+                        items.append({
+                            "id": f"AST-{i:03d}",
+                            "name": name,
+                            "lat": lat,
+                            "lng": lon,
+                            "housing_class": h_class,
+                            "area_sqm": area,
+                            "tiv_kes": tiv,
+                            "ward": ward
+                        })
+                    if items:
+                        return {
+                            "file_name": filename,
+                            "file_type": ext,
+                            "method": "tabular_csv",
+                            "extracted_text_preview": f"Tabular exposure CSV with {len(items)} assets",
+                            "extracted_structures": len(items),
+                            "housing_class": items[0]["housing_class"],
+                            "location": items[0]["ward"],
+                            "total_area_sqm": sum(a["area_sqm"] for a in items),
+                            "estimated_tiv_kes": sum(a["tiv_kes"] for a in items),
+                            "parsed_assets": items
+                        }
+        except Exception:
+            pass  # Fall through to unstructured AI extraction
+
+    # 2. Unstructured file extraction (Word DOCX, PDF, Text slip, Markdown, or non-standard file)
+    extracted_text = extract_text_from_file(filename, content)
+    if not extracted_text or len(extracted_text.strip()) < 5:
+        raise HTTPException(status_code=400, detail="Could not extract readable text from uploaded file.")
+
+    result = parse_natural_language_portfolio(extracted_text)
+
+    # Format parsed assets
+    assets = []
+    if result.get("parsed_assets") and len(result["parsed_assets"]) > 0:
+        for i, a in enumerate(result["parsed_assets"], 1):
+            assets.append({
+                "id": a.get("loc_id") or f"UPL-{i:03d}",
+                "name": a.get("name") or f"Extracted Asset #{i}",
+                "lat": float(a.get("lat") or -1.2921),
+                "lng": float(a.get("lon") or a.get("lng") or 36.8219),
+                "housing_class": a.get("housing_class", "concrete_rcc"),
+                "area_sqm": float(a.get("floor_area_m2") or 1000),
+                "tiv_kes": float(a.get("tiv_kes") or 50000000),
+                "ward": a.get("ward") or result.get("location") or "Nairobi",
+            })
+    else:
+        count = max(1, result.get("extracted_structures", 5))
+        total_tiv = float(result.get("estimated_tiv_kes", 100000000))
+        h_class = result.get("housing_class", "concrete_rcc")
+        loc = result.get("location", "Nairobi")
+        total_area = float(result.get("total_area_sqm", 5000))
+        single_tiv = total_tiv / count
+        single_area = total_area / count
+        for i in range(count):
+            assets.append({
+                "id": f"UPL-{i+1:03d}",
+                "name": f"{loc} Unit #{i+1}",
+                "lat": -1.2995 + (i - count / 2) * 0.002,
+                "lng": 36.8152 + (0.001 if i % 2 == 0 else -0.001),
+                "housing_class": h_class,
+                "area_sqm": single_area,
+                "tiv_kes": single_tiv,
+                "ward": loc,
+            })
+
+    return {
+        "file_name": filename,
+        "file_type": ext,
+        "method": "unstructured_nlp",
+        "extracted_text_preview": extracted_text[:300] + ("..." if len(extracted_text) > 300 else ""),
+        "extracted_structures": len(assets),
+        "housing_class": result.get("housing_class", "concrete_rcc"),
+        "location": result.get("location", "Nairobi"),
+        "total_area_sqm": result.get("total_area_sqm", sum(a["area_sqm"] for a in assets)),
+        "estimated_tiv_kes": result.get("estimated_tiv_kes", sum(a["tiv_kes"] for a in assets)),
+        "summary": result.get("summary", ""),
+        "parsed_assets": assets
+    }
+
 

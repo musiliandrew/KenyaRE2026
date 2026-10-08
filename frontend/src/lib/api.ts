@@ -70,6 +70,10 @@ export interface ExposureAsset {
   damage_ratio: number;
   loss_kes: number;
   risk_level: "low" | "mid" | "high";
+  lng?: number;
+  dataset_id?: string;
+  dataset_name?: string;
+  source_file?: string;
 }
 
 export interface AssetsResponse {
@@ -224,6 +228,40 @@ export const api = {
 
   // AI
   parseSlip: (text: string) => request<ParseSlipResponse>("/ai/parse-slip", { method: "POST", body: JSON.stringify({ text }) }),
+  ingestFile: async (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(`${API_URL}/api/ai/ingest-file`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "File ingestion failed" }));
+      throw new Error(err.detail || `Upload failed with status ${res.status}`);
+    }
+    return res.json() as Promise<{
+      file_name: string;
+      file_type: string;
+      method: "tabular_csv" | "unstructured_nlp";
+      extracted_text_preview: string;
+      extracted_structures: number;
+      housing_class: HousingClass;
+      location: string;
+      total_area_sqm: number;
+      estimated_tiv_kes: number;
+      summary?: string;
+      parsed_assets: Array<{
+        id: string;
+        name: string;
+        lat: number;
+        lng: number;
+        housing_class: HousingClass;
+        area_sqm: number;
+        tiv_kes: number;
+        ward: string;
+      }>;
+    }>;
+  },
   briefing: (body: BriefingRequest) => request<BriefingResponse>("/ai/briefing", { method: "POST", body: JSON.stringify(body) }),
   /** Streams the copilot reply token-by-token; calls onToken for each chunk. */
   chatStream: async (message: string, onToken: (t: string) => void, history?: { role: string; content: string }[], signal?: AbortSignal) => {
@@ -239,7 +277,85 @@ export const api = {
       onToken(dec.decode(value, { stream: true }));
     }
   },
+  assetDossier: (locId: string, rp: RP = "100y", s?: AbortSignal) =>
+    request<AssetDossierResponse>(`/exposure/asset/${encodeURIComponent(locId)}${qs({ return_period: rp })}`, undefined, s),
+  calculateAssetDossier: (payload: { asset: any; return_period?: RP; portfolio_assets?: any[] }, s?: AbortSignal) =>
+    request<AssetDossierResponse>("/exposure/asset/dossier", { method: "POST", body: JSON.stringify(payload) }, s),
 };
+
+export interface AssetDossierResponse {
+  asset: {
+    loc_id: string;
+    name: string;
+    ward: string;
+    lat: number;
+    lon: number;
+    housing_class: HousingClass;
+    housing_class_label: string;
+    floor_area_m2: number;
+    tiv_kes: number;
+    depth_m: number;
+    damage_ratio: number;
+    damage_ratio_pct: number;
+    loss_kes: number;
+    risk_level: string;
+    active_rp: string;
+    source_file?: string;
+  };
+  financial_summary: {
+    tiv_kes: number;
+    active_loss_kes: number;
+    damage_ratio_pct: number;
+    aal_gross_kes: number;
+    pure_risk_rate_pct: number;
+    recommended_premium_kes: number;
+    recommended_deductible_pct: number;
+    tiv_share_pct: number;
+    loss_share_pct: number;
+  };
+  exceedance_probability_curve: Array<{
+    return_period: string;
+    years: number;
+    annual_exceedance_prob: number;
+    label: string;
+    depth_m: number;
+    damage_ratio: number;
+    damage_ratio_pct: number;
+    loss_kes: number;
+    deductible_kes: number;
+    insured_loss_kes: number;
+  }>;
+  vulnerability_curve: {
+    housing_class: HousingClass;
+    label: string;
+    parameters: {
+      cap: number;
+      cap_pct: number;
+      k: number;
+      midpoint: number;
+      threshold_m: number;
+      jrc_reference: string;
+      typical_costs_sqm: string;
+      description: string;
+    };
+    points: Array<{ depth_m: number; damage_ratio: number; damage_ratio_pct: number }>;
+    active_operating_point: {
+      depth_m: number;
+      damage_ratio: number;
+      damage_ratio_pct: number;
+    };
+  };
+  top_exposed_locations: Array<{
+    loc_id: string;
+    name: string;
+    ward: string;
+    housing_class: string;
+    tiv_kes: number;
+    depth_m: number;
+    loss_kes: number;
+    damage_ratio: number;
+  }>;
+}
 
 // ---------- Formatting helpers (pure UI, no data) ----------
 export function formatKES(v: number, digits = 1): string {
