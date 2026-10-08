@@ -1,3 +1,4 @@
+import os
 import random
 from typing import List, Dict
 from app.models.schemas import HousingClass, ExposureAsset
@@ -96,66 +97,42 @@ def generate_synthetic_exposure(num_assets: int = 600) -> List[Dict]:
 
 def get_synthetic_hotspots() -> List[Dict]:
     """
-    Returns synthetic hotspot data for Nairobi flood-prone areas.
+    Returns official Nairobi flood hotspots.
+    Loads from nairobi_hotspots_geocoded.csv (24 validation points) if available.
     """
-    hotspots = [
-        {
-            "id": "HS001",
-            "name": "Mathare River Corridor",
-            "lat": -1.263,
-            "lng": 36.847,
-            "risk_score": 0.92,
-            "description": "High-density informal settlement along Mathare River with poor drainage",
-            "estimated_affected": 8500,
-        },
-        {
-            "id": "HS002",
-            "name": "Kibera Nairobi Dam",
-            "lat": -1.312,
-            "lng": 36.789,
-            "risk_score": 0.89,
-            "description": "Informal settlement adjacent to Nairobi Dam with overflow risk",
-            "estimated_affected": 12000,
-        },
-        {
-            "id": "HS003",
-            "name": "Dandora Phase 4",
-            "lat": -1.247,
-            "lng": 36.895,
-            "risk_score": 0.85,
-            "description": "Low-lying area with blocked drainage channels",
-            "estimated_affected": 6200,
-        },
-        {
-            "id": "HS004",
-            "name": "Korogocho Viwandani",
-            "lat": -1.253,
-            "lng": 36.912,
-            "risk_score": 0.87,
-            "description": "Riverside informal settlement with limited flood defenses",
-            "estimated_affected": 4800,
-        },
-        {
-            "id": "HS005",
-            "name": "Kawangware 56",
-            "lat": -1.278,
-            "lng": 36.798,
-            "risk_score": 0.81,
-            "description": "Informal settlement in natural drainage pathway",
-            "estimated_affected": 5500,
-        },
-        {
-            "id": "HS006",
-            "name": "Mukuru kwa Njenga",
-            "lat": -1.295,
-            "lng": 36.845,
-            "risk_score": 0.84,
-            "description": "Large informal settlement with inadequate stormwater infrastructure",
-            "estimated_affected": 9800,
-        },
+    csv_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", "team_a_nairobi", "team_a_nairobi", "nairobi_hotspots_geocoded.csv")
+    )
+    if os.path.exists(csv_path):
+        import pandas as pd
+        df = pd.read_csv(csv_path)
+        return df.rename(columns={"lon": "lng"}).to_dict(orient="records")
+
+    return [
+        {"name": "Kiambiu", "lat": -1.2822758, "lng": 36.8634101},
+        {"name": "Dandora", "lat": -1.2449083, "lng": 36.9060802},
+        {"name": "Kariobangi", "lat": -1.2590939, "lng": 36.8819135},
+        {"name": "Kayole", "lat": -1.2667475, "lng": 36.9193623},
+        {"name": "Komarock", "lat": -1.2726556, "lng": 36.9077371},
+        {"name": "Njiru", "lat": -1.2545703, "lng": 36.9920563},
+        {"name": "Ruai", "lat": -1.2689967, "lng": 36.9915483},
+        {"name": "Mwiki", "lat": -1.2327573, "lng": 36.9332678},
+        {"name": "Donholm", "lat": -1.2992254, "lng": 36.8886888},
+        {"name": "Tassia", "lat": -1.307049, "lng": 36.8986034},
+        {"name": "Fedha", "lat": -1.3156695, "lng": 36.8984952},
+        {"name": "Madaraka", "lat": -1.3074039, "lng": 36.8153361},
+        {"name": "Nairobi West", "lat": -1.3087022, "lng": 36.8230975},
+        {"name": "Lang'ata", "lat": -1.3189569, "lng": 36.7899763},
+        {"name": "Kawangware", "lat": -1.2784631, "lng": 36.751643},
+        {"name": "Kangemi", "lat": -1.2680073, "lng": 36.7522966},
+        {"name": "Lavington", "lat": -1.2740678, "lng": 36.7762269},
+        {"name": "Westlands", "lat": -1.2465281, "lng": 36.7860759},
+        {"name": "Parklands", "lat": -1.2630616, "lng": 36.8106288},
+        {"name": "Kitisuru", "lat": -1.2403787, "lng": 36.77103},
+        {"name": "Kileleshwa", "lat": -1.2767338, "lng": 36.7879011},
+        {"name": "Chiromo", "lat": -1.2708313, "lng": 36.8063848},
+        {"name": "Mathare", "lat": -1.2584151, "lng": 36.8712653},
     ]
-    
-    return hotspots
 
 
 # Global synthetic exposure cache
