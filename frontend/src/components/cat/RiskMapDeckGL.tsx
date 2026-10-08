@@ -417,10 +417,10 @@ export function RiskMapDeckGL({
       </div>
 
       {/* Map Provider Badge */}
-      <div className="absolute bottom-4 left-4 bg-white/90 backdrop-blur px-3 py-1.5 rounded-lg shadow-md">
-        <div className="flex items-center gap-2 text-xs font-medium text-slate-700">
-          <Sparkles className="size-3 text-[#D21245]" />
-          MapLibre GL · {assets.length} Assets · {hotspots.length} Hotspots
+      <div className="absolute bottom-2 sm:bottom-4 left-2 sm:left-4 bg-white/90 backdrop-blur px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg shadow-md max-w-[calc(100%-16px)]">
+        <div className="flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs font-medium text-slate-700">
+          <Sparkles className="size-3 text-[#D21245] shrink-0" />
+          <span className="truncate">MapLibre GL · {assets.length} Assets · {hotspots.length} Hotspots</span>
         </div>
       </div>
     </div>

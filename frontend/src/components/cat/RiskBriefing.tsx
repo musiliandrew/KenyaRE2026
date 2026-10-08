@@ -108,17 +108,17 @@ ${briefing.recommendations.map((r, i) => `${i + 1}. ${r}`).join("\n")}
 
       {briefing && (
         <div className="space-y-4">
-          <div className="rounded-lg border border-slate-200 bg-white p-5 space-y-4 shadow-sm">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+          <div className="rounded-lg border border-slate-200 bg-white p-3.5 sm:p-5 space-y-4 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2">
-                <FileText className="size-5 text-[#00264D]" />
-                <span className="font-semibold text-slate-900">Executive Memorandum ({scenario})</span>
+                <FileText className="size-5 text-[#00264D] shrink-0" />
+                <span className="font-semibold text-slate-900 text-sm sm:text-base">Executive Memorandum ({scenario})</span>
               </div>
               <Button
                 variant="outline"
                 size="sm"
                 onClick={handleDownload}
-                className="gap-2"
+                className="gap-2 w-full sm:w-auto"
               >
                 <Download className="size-4" />
                 Download Markdown

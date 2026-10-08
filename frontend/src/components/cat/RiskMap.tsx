@@ -483,7 +483,7 @@ export function RiskMap({
       <div ref={mapContainer} className="h-full w-full" />
 
       {/* 3D Floating Control Ribbon (Top-Left of map) */}
-      <div className="absolute top-3 left-3 z-10 flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-200/90 bg-white/95 p-1 shadow-md backdrop-blur">
+      <div className="absolute top-3 left-3 z-10 flex flex-wrap items-center gap-1.5 max-w-[calc(100%-24px)] rounded-lg border border-slate-200/90 bg-white/95 p-1 shadow-md backdrop-blur">
         {/* 3D Tilt Button */}
         <button
           onClick={toggle3DTilt}

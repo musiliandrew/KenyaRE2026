@@ -83,15 +83,15 @@ export function PropertyTable({
   return (
     <div className="space-y-4">
       {/* Search and Filters */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-        <div className="w-full sm:w-80">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 sm:gap-3">
+        <div className="w-full sm:w-72">
           <SearchBar
             value={searchQuery}
             onChange={(q) => {
               setSearchQuery(q);
               setCurrentPage(1);
             }}
-            placeholder="Search by ID, Ward or Name..."
+            placeholder="Search by ID, Ward, Name..."
           />
         </div>
         <div className="flex items-center gap-2 w-full sm:w-auto">
@@ -101,18 +101,18 @@ export function PropertyTable({
               setSelectedClass(e.target.value);
               setCurrentPage(1);
             }}
-            className="px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:ring-1 focus:ring-[#00264D] outline-none"
+            className="flex-1 sm:flex-initial px-2.5 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:ring-1 focus:ring-[#00264D] outline-none truncate"
           >
-            <option value="all">All Housing Typologies</option>
+            <option value="all">All Typologies</option>
             <option value="informal_iron_sheet">Informal Iron Sheet</option>
             <option value="semi_permanent">Semi-Permanent</option>
             <option value="permanent_masonry">Permanent Masonry</option>
             <option value="concrete_rcc">Concrete RCC</option>
           </select>
 
-          <Button variant="outline" size="sm" onClick={handleExportCSV} className="gap-1.5 text-xs">
+          <Button variant="outline" size="sm" onClick={handleExportCSV} className="gap-1.5 text-xs shrink-0 cursor-pointer">
             <Download className="size-3.5" />
-            Export CSV
+            <span className="hidden xs:inline">Export</span> CSV
           </Button>
         </div>
       </div>
@@ -181,10 +181,10 @@ export function PropertyTable({
       </div>
 
       {/* Pagination */}
-      <div className="flex items-center justify-between text-xs text-slate-600 pt-1">
-        <div>
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 text-xs text-slate-600 pt-2 border-t border-slate-100">
+        <div className="text-center sm:text-left">
           Showing {filtered.length === 0 ? 0 : startIndex + 1}–{Math.min(startIndex + itemsPerPage, filtered.length)} of{" "}
-          {filtered.length} properties
+          <span className="font-semibold">{filtered.length}</span> properties
         </div>
         <div className="flex items-center gap-1.5">
           <Button
@@ -192,19 +192,19 @@ export function PropertyTable({
             size="sm"
             onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
             disabled={currentPage === 1}
-            className="h-7 text-xs"
+            className="h-8 text-xs cursor-pointer"
           >
             Previous
           </Button>
-          <span className="px-2 text-slate-700">
-            Page {totalPages === 0 ? 0 : currentPage} of {totalPages}
+          <span className="px-2 text-slate-700 font-medium">
+            {totalPages === 0 ? 0 : currentPage} / {totalPages}
           </span>
           <Button
             variant="outline"
             size="sm"
             onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
             disabled={currentPage >= totalPages}
-            className="h-7 text-xs"
+            className="h-8 text-xs cursor-pointer"
           >
             Next
           </Button>

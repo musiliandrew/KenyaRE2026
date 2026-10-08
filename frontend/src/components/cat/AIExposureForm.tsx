@@ -99,72 +99,72 @@ export function AIExposureForm({ onPortfolioUpdated }: { onPortfolioUpdated?: ()
       </div>
 
       {result && (
-        <div className="rounded-lg border border-slate-200 bg-white p-5 space-y-4 shadow-sm">
+        <div className="rounded-lg border border-slate-200 bg-white p-3.5 sm:p-5 space-y-4 shadow-sm">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <CheckCircle2 className="size-5 text-emerald-600" />
-              <span className="font-semibold text-slate-900">Extracted & Actuarially Grounded</span>
+              <CheckCircle2 className="size-5 text-emerald-600 shrink-0" />
+              <span className="font-semibold text-slate-900 text-sm sm:text-base">Extracted & Actuarially Grounded</span>
             </div>
-            <Badge className="bg-emerald-100 text-emerald-800">
+            <Badge className="bg-emerald-100 text-emerald-800 text-xs">
               {result.hazard_tier}
             </Badge>
           </div>
 
-          <p className="text-xs text-slate-600 italic bg-slate-50 p-2.5 rounded border border-slate-100">
+          <p className="text-xs text-slate-600 italic bg-slate-50 p-2.5 rounded border border-slate-100 break-words">
             "{result.summary}"
           </p>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-3 text-xs sm:text-sm">
             <div className="bg-slate-50 p-2.5 rounded">
-              <div className="text-xs text-slate-500">Locality</div>
-              <div className="font-semibold text-slate-900">{result.location}</div>
+              <div className="text-[11px] sm:text-xs text-slate-500">Locality</div>
+              <div className="font-semibold text-slate-900 truncate">{result.location}</div>
             </div>
             <div className="bg-slate-50 p-2.5 rounded">
-              <div className="text-xs text-slate-500">Typology</div>
-              <div className="font-semibold text-slate-900">
+              <div className="text-[11px] sm:text-xs text-slate-500">Typology</div>
+              <div className="font-semibold text-slate-900 truncate">
                 {CLASS_LABEL[result.housing_class as HousingClass] || result.housing_class}
               </div>
             </div>
             <div className="bg-slate-50 p-2.5 rounded">
-              <div className="text-xs text-slate-500">Units Count</div>
+              <div className="text-[11px] sm:text-xs text-slate-500">Units Count</div>
               <div className="font-semibold text-slate-900">{result.extracted_structures} structures</div>
             </div>
             <div className="bg-slate-50 p-2.5 rounded">
-              <div className="text-xs text-slate-500">Total Area</div>
+              <div className="text-[11px] sm:text-xs text-slate-500">Total Area</div>
               <div className="font-semibold text-slate-900">{result.total_area_sqm.toLocaleString()} m²</div>
             </div>
             <div className="bg-slate-50 p-2.5 rounded">
-              <div className="text-xs text-slate-500">Total TIV</div>
-              <div className="font-semibold font-mono text-[#00264D]">
+              <div className="text-[11px] sm:text-xs text-slate-500">Total TIV</div>
+              <div className="font-semibold font-mono text-[#00264D] text-xs sm:text-sm truncate">
                 {formatKES(result.estimated_tiv_kes)}
               </div>
             </div>
             <div className="bg-slate-50 p-2.5 rounded">
-              <div className="text-xs text-slate-500">100-Year Depth</div>
+              <div className="text-[11px] sm:text-xs text-slate-500">100-Year Depth</div>
               <div className="font-semibold font-mono text-red-700">
                 {result.estimated_depth_m.toFixed(2)} m
               </div>
             </div>
           </div>
 
-          <div className="flex items-center justify-between p-3 bg-red-50 border border-red-100 rounded text-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 bg-red-50 border border-red-100 rounded text-sm">
             <div>
               <span className="text-xs text-red-700 font-medium">Recommended Flood Premium:</span>
-              <div className="font-bold font-mono text-red-800 text-base">
+              <div className="font-bold font-mono text-red-800 text-sm sm:text-base">
                 {formatKES(result.recommended_premium_kes)}
               </div>
             </div>
-            <div className="text-right">
+            <div className="text-left sm:text-right">
               <span className="text-xs text-red-700">Technical Rate:</span>
               <div className="font-semibold text-red-800">{result.technical_rate_pct}%</div>
             </div>
           </div>
 
-          <div className="flex gap-2 pt-1">
+          <div className="flex flex-col sm:flex-row gap-2 pt-1">
             <Button
               onClick={handleAddToPortfolio}
               disabled={isUploading}
-              className="flex-1 bg-[#00264D] hover:bg-[#001830] text-white"
+              className="w-full sm:flex-1 bg-[#00264D] hover:bg-[#001830] text-white"
             >
               {isUploading ? (
                 <>
@@ -181,6 +181,7 @@ export function AIExposureForm({ onPortfolioUpdated }: { onPortfolioUpdated?: ()
                 setResult(null);
                 setText("");
               }}
+              className="w-full sm:w-auto"
             >
               Clear
             </Button>

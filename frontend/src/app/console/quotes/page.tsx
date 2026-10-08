@@ -30,33 +30,35 @@ export default function QuotesPage() {
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => router.push("/console")}
+              onClick={() => router.push("/dashboard")}
+              className="size-8 sm:size-9"
             >
-              <ArrowLeft className="size-5" />
+              <ArrowLeft className="size-4 sm:size-5" />
             </Button>
             <div>
-              <div className="text-sm font-bold tracking-tight text-[#00264D]">
-                Insurance Quotes
+              <div className="text-xs sm:text-sm font-bold tracking-tight text-[#00264D]">
+                Facultative Quotes
               </div>
-              <div className="text-xs text-slate-500">Calculate premiums and deductibles</div>
+              <div className="text-[10px] sm:text-xs text-slate-500">Calculate premiums and deductibles</div>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
               size="sm"
-              onClick={() => router.push("/console")}
+              onClick={() => router.push("/dashboard")}
+              className="text-xs cursor-pointer"
             >
-              Back to Dashboard
+              <span className="hidden xs:inline">Back to</span> Dashboard
             </Button>
           </div>
         </div>
       </header>
 
       {/* Main Content */}
-      <main className="p-6">
+      <main className="p-3 sm:p-6">
         <div className="max-w-2xl mx-auto">
-          <div className="rounded-xl border border-slate-200 bg-white p-6">
+          <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-6 shadow-xs">
             <QuoteGenerator />
           </div>
         </div>
