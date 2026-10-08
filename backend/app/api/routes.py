@@ -53,19 +53,53 @@ def root() -> Dict[str, Any]:
 
 
 # ============================================================================
-# PILLAR 1: HAZARD LAYER
+# PILLAR 1: HAZARD LAYER (CLIMADA Compatible & GeoTIFF Driven)
 # ============================================================================
+
+from app.services.hazard_engine import hazard_engine
 
 @router.post("/hazard/lookup", response_model=HazardLookupResponse, tags=["Pillar 1: Hazard"])
 def lookup_hazard(req: HazardLookupRequest):
     """
-    Looks up hazard score and depth for a given location and return period.
-    
-    In production, this would sample from actual GeoTIFF raster files using Rasterio.
-    Currently returns proxy values for demonstration.
+    Sub-millisecond raster lookup: samples pluvial susceptibility and calibrated flood depth
+    directly from the 5 GeoTIFF rasters using exact affine transform coordinates.
     """
-    result = lookup_hazard_score(req.lat, req.lng, req.return_period.value)
-    return HazardLookupResponse(**result)
+    res = hazard_engine.get_hazard_depth(req.lat, req.lng, req.return_period.value)
+    return HazardLookupResponse(
+        lat=res["lat"],
+        lng=res["lon"],
+        return_period=res["return_period"],
+        hazard_score=res["hazard_score"],
+        depth_m=res["depth_m"],
+        tier_label=res["tier_label"]
+    )
+
+
+@router.get("/hazard/hotspots", tags=["Pillar 1: Hazard"])
+def get_validated_hotspots(return_period: str = "100y") -> List[Dict[str, Any]]:
+    """
+    Returns the 24 official county flood hotspots evaluated across the requested return period raster.
+    """
+    hotspots = get_synthetic_hotspots()
+    return hazard_engine.validate_hotspots(hotspots, return_period)
+
+
+@router.post("/hazard/climada-matrix", tags=["Pillar 1: Hazard"])
+def get_climada_matrix(req: List[Dict[str, float]]) -> Dict[str, Any]:
+    """
+    Constructs a CLIMADA-compatible Hazard structure (intensity matrix, frequency array, centroids)
+    for arbitrary coordinates across all 5 calibrated return periods.
+    """
+    coords = [(item["lat"], item["lng"]) for item in req]
+    matrix = hazard_engine.to_climada_hazard_matrix(coords)
+    return {
+        "climada_compatible": matrix["climada_compatible"],
+        "n_events": matrix["n_events"],
+        "n_centroids": matrix["n_centroids"],
+        "events": matrix["events"],
+        "frequency": matrix["frequency"],
+        "intensity_dep_m": matrix["intensity_matrix"].tolist()
+    }
 
 
 # ============================================================================
