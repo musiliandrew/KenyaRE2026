@@ -1,21 +1,73 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Literal, Any
+from enum import Enum
+
+
+class HousingClass(str, Enum):
+    informal_iron_sheet = "informal_iron_sheet"
+    semi_permanent = "semi_permanent"
+    permanent_masonry = "permanent_masonry"
+    concrete_rcc = "concrete_rcc"
+
+
+class ReturnPeriod(str, Enum):
+    rp5 = "5y"
+    rp10 = "10y"
+    rp25 = "25y"
+    rp50 = "50y"
+    rp100 = "100y"
 
 
 class ExposureAsset(BaseModel):
     id: str
     name: str
+    lat: float = Field(..., ge=-90, le=90)
+    lng: float = Field(..., ge=-180, le=180)
+    housing_class: HousingClass
+    area_sqm: float = Field(..., gt=0)
+    tiv_kes: float = Field(..., gt=0)
+    ward: Optional[str] = None
+    hazard_score: float = Field(default=0.0, ge=0.0, le=1.0, description="Proxy hazard score 0-1 from terrain analysis")
+    drainage_penalty: float = Field(default=0.0, ge=0.0, description="AI-detected drainage gap penalty")
+    effective_hazard: float = Field(default=0.0, ge=0.0, description="Combined hazard after AI adjustment")
+    loss_kes: float = Field(default=0.0, ge=0.0)
+    damage_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    synthetic: bool = True
+
+
+class ExposureUpload(BaseModel):
+    assets: List[ExposureAsset]
+    source: str = Field(default="upload", description="upload, nlp_parse, or synthetic")
+
+
+class HazardLookupRequest(BaseModel):
+    lat: float = Field(..., ge=-90, le=90)
+    lng: float = Field(..., ge=-180, le=180)
+    return_period: ReturnPeriod
+
+
+class HazardLookupResponse(BaseModel):
     lat: float
     lng: float
-    housing_class: str = Field(..., description="informal_iron_sheet, semi_permanent, or permanent_masonry")
-    area_sqm: float
+    return_period: str
+    hazard_score: float
+    depth_m: float
+    tier_label: str
+
+
+class DamageCalculationRequest(BaseModel):
+    housing_class: HousingClass
+    depth_m: float = Field(..., ge=0.0)
+    tiv_kes: float = Field(..., gt=0)
+
+
+class DamageCalculationResponse(BaseModel):
+    housing_class: str
+    depth_m: float
     tiv_kes: float
-    hazard_score: float = Field(..., ge=0.0, le=1.0)
-    drainage_penalty: float = 0.0
-    effective_hazard: float = 0.0
-    loss_kes: float = 0.0
-    damage_ratio: float = 0.0
-    synthetic: bool = True
+    damage_ratio: float
+    loss_kes: float
+    damage_cap_pct: float
 
 
 class ReturnPeriodMetric(BaseModel):
@@ -25,6 +77,15 @@ class ReturnPeriodMetric(BaseModel):
     portfolio_loss_kes: float
     loss_ratio: float
     pml_90: float
+    ai_adjusted_loss: Optional[float] = None
+    ai_delta_kes: Optional[float] = None
+
+
+class EPCurveResponse(BaseModel):
+    metrics: List[ReturnPeriodMetric]
+    total_tiv_kes: float
+    aal_kes: float
+    ai_enabled: bool
 
 
 class PortfolioSummary(BaseModel):
@@ -35,6 +96,26 @@ class PortfolioSummary(BaseModel):
     active_rp: str
     hotspot_count: int
     synthetic_notice: str = "All values synthetic for hackathon evaluation."
+
+
+class RunModelRequest(BaseModel):
+    scenario: ReturnPeriod = Field(default=ReturnPeriod.rp100)
+    apply_ai: bool = Field(default=True, description="Apply AI drainage gap adjustments")
+    exposure: Optional[List[ExposureAsset]] = None
+
+
+class RunModelResponse(BaseModel):
+    scenario: str
+    total_tiv_kes: float
+    portfolio_loss_kes: float
+    loss_ratio: float
+    aal_kes: float
+    asset_count: int
+    ai_enabled: bool
+    ai_delta_kes: Optional[float] = None
+    loss_by_class: Dict[str, float]
+    top_losses: List[Dict[str, Any]]
+    ep_curve: List[ReturnPeriodMetric]
 
 
 class NLPParseRequest(BaseModel):
@@ -53,3 +134,20 @@ class NLPParseResponse(BaseModel):
     recommended_premium_kes: float
     technical_rate_pct: float
     summary: str
+    parsed_assets: List[ExposureAsset]
+
+
+class BriefingRequest(BaseModel):
+    scenario: ReturnPeriod
+    portfolio_loss_kes: float
+    loss_ratio: float
+    key_hotspots: List[str]
+    ai_enabled: bool = True
+
+
+class BriefingResponse(BaseModel):
+    briefing: str
+    executive_summary: str
+    key_findings: List[str]
+    recommendations: List[str]
+    disclaimer: str

@@ -12,6 +12,8 @@ rasterio>=1.3.9
 geopandas>=0.14.3
 shapely>=2.0.3
 pyproj>=3.6.1
+rioxarray>=0.15.0
+xarray>=2024.2.0
 
 # Numerical & Data Analysis (Pillars 2, 3, 4: Vulnerability, Exposure, Financial Engine)
 numpy>=1.26.4
@@ -21,6 +23,7 @@ scipy>=1.12.0
 # AI & LLM Ingestion Layer
 openai>=1.14.0
 tiktoken>=0.6.0
+instructor>=1.3.0
 
 # Utilities & Networking
 python-dotenv>=1.0.1
