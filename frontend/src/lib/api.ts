@@ -1,7 +1,7 @@
 // Typed API client for the Kenya Re CAT backend (FastAPI).
 // Single source of truth for every network call - no component should call fetch() directly.
 
-export const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
+export const API_URL = (process.env.NEXT_PUBLIC_API_URL || "https://kenre.netsight.co.ke/").replace(/\/$/, "");
 
 export type RP = "5y" | "10y" | "25y" | "50y" | "100y";
 export type HousingClass = "informal_iron_sheet" | "semi_permanent" | "permanent_masonry" | "concrete_rcc";
@@ -272,7 +272,7 @@ export const api = {
     if (!res.ok || !res.body) throw new ApiError(res.status, `chat stream failed (${res.status})`);
     const reader = res.body.getReader();
     const dec = new TextDecoder();
-    for (;;) {
+    for (; ;) {
       const { done, value } = await reader.read();
       if (done) break;
       onToken(dec.decode(value, { stream: true }));
