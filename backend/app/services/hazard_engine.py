@@ -172,6 +172,56 @@ class HazardEngine:
         """Samples all 5 event tiers for a single asset (returns full hazard profile)."""
         return {rp: self.get_hazard_depth(lat, lon, rp) for rp in HAZARD_TIER_CONFIG}
 
+    def get_hazard_grid(
+        self,
+        return_period: str = "100y",
+        bbox: Tuple[float, float, float, float] = (-1.45, 36.65, -1.15, 37.15),
+        step: int = 12,
+        min_depth_m: float = 0.05,
+    ) -> Dict[str, Any]:
+        """
+        Returns a downsampled grid of wet cells (depth >= min_depth_m) for map rendering.
+        bbox = (lat_min, lon_min, lat_max, lon_max); step = raster cells per output cell.
+        """
+        rp = return_period.lower()
+        raster = self.rasters.get(rp) or self.rasters.get("100y")
+        if raster is None or raster.data is None:
+            return {"return_period": rp, "cell_size_deg": 0.0, "count": 0, "cells": []}
+
+        lat_min, lon_min, lat_max, lon_max = bbox
+        row_start = max(0, int((raster.origin_lat - lat_max) / raster.pixel_size_y))
+        row_end = min(raster.height, int((raster.origin_lat - lat_min) / raster.pixel_size_y))
+        col_start = max(0, int((lon_min - raster.origin_lon) / raster.pixel_size_x))
+        col_end = min(raster.width, int((lon_max - raster.origin_lon) / raster.pixel_size_x))
+
+        block = np.nan_to_num(raster.data[row_start:row_end, col_start:col_end].astype(np.float32), nan=0.0)
+        block = np.clip(block, 0.0, 1.0)
+        h = (block.shape[0] // step) * step
+        w = (block.shape[1] // step) * step
+        if h == 0 or w == 0:
+            return {"return_period": rp, "cell_size_deg": 0.0, "count": 0, "cells": []}
+        pooled = block[:h, :w].reshape(h // step, step, w // step, step).mean(axis=(1, 3))
+
+        anchor = raster.depth_anchor
+        rows, cols = np.nonzero(pooled * anchor >= min_depth_m)
+        cells = []
+        for r, c in zip(rows, cols):
+            score = float(pooled[r, c])
+            lat = raster.origin_lat - (row_start + (r + 0.5) * step) * raster.pixel_size_y
+            lon = raster.origin_lon + (col_start + (c + 0.5) * step) * raster.pixel_size_x
+            cells.append({
+                "lat": round(lat, 5),
+                "lon": round(lon, 5),
+                "score": round(score, 3),
+                "depth_m": round(score * anchor, 3),
+            })
+        return {
+            "return_period": rp,
+            "cell_size_deg": round(step * raster.pixel_size_x, 6),
+            "count": len(cells),
+            "cells": cells,
+        }
+
     def validate_hotspots(self, hotspots: List[Dict[str, Any]], return_period: str = "100y") -> List[Dict[str, Any]]:
         """
         Evaluates model depth & susceptibility across official county flood hotspots.

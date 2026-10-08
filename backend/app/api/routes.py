@@ -161,32 +161,58 @@ def get_portfolio_summary(return_period: str = "100y"):
     Returns executive metrics for Nairobi urban pluvial exposure using verified baseline portfolio.
     """
     stats = exposure_engine.get_summary_statistics()
-    enriched = exposure_engine.match_spatial_hazard(return_period)
-    
-    # Calculate initial baseline event loss using Module 2 vulnerability engine
-    from app.services.vulnerability_engine import vulnerability_engine
-    event_loss = sum(
-        vulnerability_engine.calculate_loss(a["tiv_kes"], a["depth_m"], a["housing_class"])["loss_kes"]
-        for a in enriched
-    )
+    ep = financial_engine.calculate_ep_curve()
+    point = next((m for m in ep["ep_curve"] if m["return_period"] == return_period), ep["ep_curve"][-1])
 
     return PortfolioSummary(
         tiv_kes=stats["total_tiv_kes"],
-        event_loss_kes=round(event_loss, 2),
-        aal_kes=round(event_loss * 0.112, 2),
+        event_loss_kes=point["gross_loss_kes"],
+        aal_kes=ep["aal_gross_kes"],
         asset_count=stats["asset_count"],
         active_rp=return_period,
         hotspot_count=len(get_synthetic_hotspots()),
+        pml_100y_kes=ep["pml_100y_kes"],
+        loss_ratio=point["loss_ratio"],
     )
 
 
 @router.get("/exposure/assets", tags=["Pillar 3: Exposure"])
-def get_exposure_assets(return_period: str = "100y", limit: int = 100) -> List[Dict[str, Any]]:
+def get_exposure_assets(
+    return_period: str = "100y",
+    limit: int = 1000,
+    offset: int = 0,
+    ward: Optional[str] = None,
+    housing_class: Optional[str] = None,
+) -> Dict[str, Any]:
     """
-    Returns geocoded portfolio assets enriched with spatial hazard depths and administrative wards.
+    Returns geocoded portfolio assets enriched with spatial hazard depth, damage ratio,
+    modeled loss and risk level for the requested return period.
     """
-    enriched = exposure_engine.match_spatial_hazard(return_period)
-    return enriched[:limit]
+    from app.services.vulnerability_engine import vulnerability_engine
+
+    assets = exposure_engine.assets
+    if ward:
+        assets = [a for a in assets if a.get("ward", "").lower() == ward.lower()]
+    if housing_class:
+        assets = [a for a in assets if a["housing_class"] == housing_class]
+
+    enriched = exposure_engine.match_spatial_hazard(return_period, assets=assets)
+    for a in enriched:
+        calc = vulnerability_engine.calculate_loss(a["tiv_kes"], a["depth_m"], a["housing_class"])
+        a["damage_ratio"] = calc["damage_ratio"]
+        a["loss_kes"] = calc["loss_kes"]
+        a["risk_level"] = "high" if calc["damage_ratio"] > 0.35 else "mid" if calc["damage_ratio"] > 0.08 else "low"
+
+    page = enriched[offset: offset + limit]
+    return {"total": len(enriched), "offset": offset, "returned": len(page), "return_period": return_period, "assets": page}
+
+
+@router.get("/hazard/grid", tags=["Pillar 1: Hazard"])
+def get_hazard_grid(return_period: str = "100y", step: int = 12, min_depth_m: float = 0.05) -> Dict[str, Any]:
+    """
+    Downsampled wet-cell grid from the GeoTIFF raster for the deck.gl / MapLibre flood layer.
+    """
+    return hazard_engine.get_hazard_grid(return_period, step=max(2, min(step, 64)), min_depth_m=min_depth_m)
 
 
 @router.get("/exposure/stats", tags=["Pillar 3: Exposure"])
@@ -223,11 +249,11 @@ def upload_exposure(upload: ExposureUpload):
 
 
 @router.get("/portfolio/assets", tags=["Pillar 3: Exposure"])
-def get_portfolio_synthetic_assets(limit: int = 100):
+def get_portfolio_assets(limit: int = 100):
     """
-    Returns exposure assets from the synthetic portfolio.
+    Returns the baseline exposure portfolio (600 buildings) from the Exposure Engine.
     """
-    assets = get_synthetic_exposure()
+    assets = exposure_engine.assets
     return {
         "total": len(assets),
         "returned": min(limit, len(assets)),
@@ -236,11 +262,11 @@ def get_portfolio_synthetic_assets(limit: int = 100):
 
 
 @router.get("/portfolio/hotspots", tags=["Pillar 3: Exposure"])
-def get_hotspots():
+def get_hotspots(return_period: str = "100y"):
     """
-    Returns known flood hotspots in Nairobi.
+    Returns county flood hotspots evaluated against the hazard raster (depth and susceptibility).
     """
-    hotspots = get_synthetic_hotspots()
+    hotspots = hazard_engine.validate_hotspots(get_synthetic_hotspots(), return_period)
     return {
         "count": len(hotspots),
         "hotspots": hotspots
@@ -257,22 +283,28 @@ def get_ep_curve(ai_enabled: bool = True):
     Returns Exceedance Probability (EP) curve data and trapezoidal AAL across all 5 calibrated return periods.
     Powered by the Module 4 Financial Engine with GeoTIFF raster event sampling.
     """
-    ep_data = financial_engine.calculate_ep_curve(apply_ai_drainage=ai_enabled)
-    metrics = [
-        ReturnPeriodMetric(
+    base = financial_engine.calculate_ep_curve(apply_ai_drainage=False)
+    ai = financial_engine.calculate_ep_curve(apply_ai_drainage=True) if ai_enabled else None
+    ai_by_rp = {m["return_period"]: m for m in ai["ep_curve"]} if ai else {}
+
+    metrics = []
+    for m in base["ep_curve"]:
+        a = ai_by_rp.get(m["return_period"])
+        metrics.append(ReturnPeriodMetric(
             return_period=m["return_period"],
             years=m["years"],
             annual_prob=m["annual_prob"],
             portfolio_loss_kes=m["gross_loss_kes"],
             loss_ratio=m["loss_ratio"],
             pml_90=m["pml_90"],
-        )
-        for m in ep_data["ep_curve"]
-    ]
+            ai_adjusted_loss=a["gross_loss_kes"] if a else None,
+            ai_delta_kes=round(a["gross_loss_kes"] - m["gross_loss_kes"], 2) if a else None,
+        ))
     return EPCurveResponse(
         metrics=metrics,
-        total_tiv_kes=ep_data["total_tiv_kes"],
-        aal_kes=ep_data["aal_gross_kes"],
+        total_tiv_kes=base["total_tiv_kes"],
+        aal_kes=ai["aal_gross_kes"] if ai else base["aal_gross_kes"],
+        baseline_aal_kes=base["aal_gross_kes"],
         ai_enabled=ai_enabled
     )
 
@@ -325,43 +357,53 @@ def quote_facultative_slip(req: FacultativeQuoteRequest):
 @router.post("/model/run", response_model=RunModelResponse, tags=["Pillar 4: Financial Engine"])
 def run_model(req: RunModelRequest):
     """
-    Runs the full catastrophe model for a given scenario.
-    Computes portfolio loss, EP curve, and AAL.
+    Runs the full catastrophe pipeline (hazard rasters -> JRC vulnerability -> exposure -> financial engine)
+    for a scenario. Uses the uploaded exposure if supplied, otherwise the baseline 600-building portfolio.
     """
-    # Use provided exposure or synthetic data
-    assets = req.exposure if req.exposure else get_synthetic_exposure()
-    
-    # Apply AI adjustments if requested
-    if req.apply_ai:
-        assets = apply_ai_drainage_adjustments(assets.copy())
-    
-    # Calculate portfolio loss for the scenario
-    result = calculate_portfolio_loss(assets, req.scenario.value, apply_ai=req.apply_ai)
-    
-    # Calculate AAL
-    aal = calculate_aal(assets, apply_ai=req.apply_ai)
-    
-    # Calculate AI delta
-    ai_delta = None
-    if req.apply_ai:
-        result_no_ai = calculate_portfolio_loss(assets, req.scenario.value, apply_ai=False)
-        ai_delta = result["portfolio_loss_kes"] - result_no_ai["portfolio_loss_kes"]
-    
-    # Get full EP curve
-    ep_curve = compute_ep_curve(assets, apply_ai=req.apply_ai)
-    
+    custom = None
+    if req.exposure:
+        custom = [
+            {
+                "loc_id": a.id, "name": a.name, "lat": a.lat, "lon": a.lng,
+                "housing_class": a.housing_class.value, "floor_area_m2": a.area_sqm,
+                "tiv_kes": a.tiv_kes, "ward": a.ward or "Uploaded",
+            }
+            for a in req.exposure
+        ]
+
+    base = financial_engine.calculate_ep_curve(assets=custom, apply_ai_drainage=False)
+    active = financial_engine.calculate_ep_curve(assets=custom, apply_ai_drainage=req.apply_ai) if req.apply_ai else base
+
+    rp = req.scenario.value
+    elt = next(e for e in active["event_loss_table"] if e["return_period"] == rp)
+    base_elt = next(e for e in base["event_loss_table"] if e["return_period"] == rp)
+    base_curve = {m["return_period"]: m for m in base["ep_curve"]}
+
+    metrics = []
+    for m in active["ep_curve"]:
+        b = base_curve[m["return_period"]]
+        metrics.append(ReturnPeriodMetric(
+            return_period=m["return_period"], years=m["years"], annual_prob=m["annual_prob"],
+            portfolio_loss_kes=b["gross_loss_kes"], loss_ratio=b["loss_ratio"], pml_90=b["pml_90"],
+            ai_adjusted_loss=m["gross_loss_kes"] if req.apply_ai else None,
+            ai_delta_kes=round(m["gross_loss_kes"] - b["gross_loss_kes"], 2) if req.apply_ai else None,
+        ))
+
     return RunModelResponse(
-        scenario=req.scenario.value,
-        total_tiv_kes=result["total_tiv_kes"],
-        portfolio_loss_kes=result["portfolio_loss_kes"],
-        loss_ratio=result["loss_ratio"],
-        aal_kes=aal,
-        asset_count=result["asset_count"],
+        scenario=rp,
+        total_tiv_kes=active["total_tiv_kes"],
+        portfolio_loss_kes=elt["gross_portfolio_loss_kes"],
+        loss_ratio=elt["gross_loss_ratio"],
+        aal_kes=active["aal_gross_kes"],
+        asset_count=len(custom) if custom is not None else len(exposure_engine.assets),
         ai_enabled=req.apply_ai,
-        ai_delta_kes=ai_delta,
-        loss_by_class=result["loss_by_class"],
-        top_losses=result["top_losses"],
-        ep_curve=[ReturnPeriodMetric(**m) for m in ep_curve]
+        ai_delta_kes=round(elt["gross_portfolio_loss_kes"] - base_elt["gross_portfolio_loss_kes"], 2) if req.apply_ai else None,
+        aal_ai_delta_kes=round(active["aal_gross_kes"] - base["aal_gross_kes"], 2) if req.apply_ai else None,
+        loss_by_class=elt["loss_by_class"],
+        loss_by_ward=elt["top_loss_wards"],
+        top_losses=elt["top_properties"],
+        ep_curve=metrics,
+        source="uploaded_exposure" if custom is not None else "baseline_portfolio",
     )
 
 
