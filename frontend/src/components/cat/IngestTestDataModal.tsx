@@ -23,6 +23,11 @@ import {
   Download,
   Building2,
   X,
+  Search,
+  Droplets,
+  Layers,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -215,6 +220,10 @@ export function IngestTestDataModal({
     totalTiv?: number;
     previewSnippet?: string;
   } | null>(null);
+
+  // Asset schedule table viewer state
+  const [assetSearchQuery, setAssetSearchQuery] = useState("");
+  const [showAllPreviewAssets, setShowAllPreviewAssets] = useState(false);
 
   // Tab 2: Broker slip text
   const [slipText, setSlipText] = useState(
@@ -860,36 +869,142 @@ export function IngestTestDataModal({
                     </div>
                   )}
 
-                  {/* Quick table preview of first 4 properties */}
-                  <div className="border border-slate-200 rounded-lg overflow-hidden">
-                    <table className="w-full text-left text-[11px]">
-                      <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
-                        <tr>
-                          <th className="p-2">ID</th>
-                          <th className="p-2">Asset Name</th>
-                          <th className="p-2">Ward</th>
-                          <th className="p-2">Typology</th>
-                          <th className="p-2 text-right">TIV</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {parsedRawAssets.slice(0, 4).map((a, idx) => (
-                          <tr key={a.id || idx} className="hover:bg-slate-50">
-                            <td className="p-2 font-mono text-slate-700">{a.id}</td>
-                            <td className="p-2 font-medium text-slate-900 truncate max-w-[150px]">{a.name}</td>
-                            <td className="p-2 text-slate-600">{a.ward}</td>
-                            <td className="p-2 capitalize text-slate-600">{a.housing_class.replace(/_/g, " ")}</td>
-                            <td className="p-2 font-mono font-semibold text-right text-slate-900">{formatKES(a.tiv_kes)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  {parsedRawAssets.length > 4 && (
-                    <div className="text-[10px] text-slate-500 text-center">
-                      + {parsedRawAssets.length - 4} more geocoded assets ready for simulation run
-                    </div>
-                  )}
+                  {/* Interactive Asset Schedule Viewer with Search & Expansion */}
+                  {(() => {
+                    const filtered = parsedRawAssets.filter((a) => {
+                      if (!assetSearchQuery.trim()) return true;
+                      const q = assetSearchQuery.toLowerCase();
+                      return (
+                        String(a.id || "").toLowerCase().includes(q) ||
+                        String(a.name || "").toLowerCase().includes(q) ||
+                        String(a.ward || "").toLowerCase().includes(q) ||
+                        String(a.housing_class || "").toLowerCase().includes(q)
+                      );
+                    });
+                    const isExpanded = showAllPreviewAssets || assetSearchQuery.trim().length > 0;
+                    const displayed = isExpanded ? filtered : filtered.slice(0, 5);
+
+                    return (
+                      <div className="space-y-2">
+                        {/* Search & Mode Bar */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1">
+                          <div className="relative flex-1 max-w-sm">
+                            <Search className="size-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                            <input
+                              type="text"
+                              value={assetSearchQuery}
+                              onChange={(e) => setAssetSearchQuery(e.target.value)}
+                              placeholder={`Search across all ${parsedRawAssets.length} assets...`}
+                              className="w-full pl-8 pr-3 py-1 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#00264D] focus:bg-white"
+                            />
+                            {assetSearchQuery && (
+                              <button
+                                onClick={() => setAssetSearchQuery("")}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
+                              >
+                                ×
+                              </button>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 self-end sm:self-auto">
+                            <span className="text-[11px] text-slate-500 font-medium">
+                              Showing <strong>{displayed.length}</strong> of <strong>{parsedRawAssets.length}</strong>
+                            </span>
+                            {parsedRawAssets.length > 5 && !assetSearchQuery && (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setShowAllPreviewAssets(!showAllPreviewAssets)}
+                                className="h-7 text-[11px] px-2.5 gap-1 border-slate-300 text-[#00264D] hover:bg-slate-100 cursor-pointer"
+                              >
+                                {showAllPreviewAssets ? (
+                                  <>
+                                    <ChevronUp className="size-3" /> Show Top 5
+                                  </>
+                                ) : (
+                                  <>
+                                    <ChevronDown className="size-3" /> View All ({parsedRawAssets.length})
+                                  </>
+                                )}
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Schedule Table Container */}
+                        <div className={`border border-slate-200 rounded-lg overflow-hidden ${isExpanded ? "max-h-72 overflow-y-auto" : ""}`}>
+                          <table className="w-full text-left text-[11px]">
+                            <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200 sticky top-0 z-10 shadow-2xs">
+                              <tr>
+                                <th className="p-2 w-14">ID</th>
+                                <th className="p-2">Asset Name</th>
+                                <th className="p-2">Ward / Locality</th>
+                                <th className="p-2">Typology</th>
+                                <th className="p-2 text-right">TIV (KES)</th>
+                                <th className="p-2 text-center">Pluvial Depth (100y)</th>
+                                <th className="p-2">Hazard Tier</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 bg-white">
+                              {displayed.map((a, idx) => {
+                                const depth = typeof a.depth_m === "number" ? a.depth_m : 0.20;
+                                const tier = a.tier_label || (depth > 1.0 ? "Extreme Floodway" : depth > 0.4 ? "High Hazard" : "Moderate Pluvial");
+                                return (
+                                  <tr key={a.id || idx} className="hover:bg-blue-50/40 transition">
+                                    <td className="p-2 font-mono font-bold text-slate-800">{a.id}</td>
+                                    <td className="p-2 font-medium text-slate-900 truncate max-w-[160px]" title={a.name}>
+                                      {a.name}
+                                    </td>
+                                    <td className="p-2 text-slate-600 truncate max-w-[110px]">{a.ward}</td>
+                                    <td className="p-2 capitalize text-slate-600 truncate max-w-[110px]">
+                                      {a.housing_class.replace(/_/g, " ")}
+                                    </td>
+                                    <td className="p-2 font-mono font-semibold text-right text-slate-900">
+                                      {formatKES(a.tiv_kes)}
+                                    </td>
+                                    <td className="p-2 text-center">
+                                      <span className="inline-flex items-center gap-1 font-mono text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-50 text-cyan-800 border border-cyan-200">
+                                        <Droplets className="size-2.5 text-cyan-600" />
+                                        {depth.toFixed(2)} m
+                                      </span>
+                                    </td>
+                                    <td className="p-2 text-[10px] text-slate-600 truncate max-w-[120px]">
+                                      {tier}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                              {displayed.length === 0 && (
+                                <tr>
+                                  <td colSpan={7} className="p-4 text-center text-xs text-slate-500">
+                                    No assets found matching "{assetSearchQuery}".
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* Pluvial GeoTIFF Engine Notice */}
+                        <div className="flex items-center justify-between text-[10px] text-slate-500 px-1">
+                          <span className="flex items-center gap-1 text-slate-600">
+                            <Layers className="size-3 text-blue-600" />
+                            Depths physically sampled from 5-tier Nairobi Pluvial GeoTIFF rasters (5y–100y).
+                          </span>
+                          {parsedRawAssets.length > 5 && !showAllPreviewAssets && !assetSearchQuery && (
+                            <button
+                              type="button"
+                              onClick={() => setShowAllPreviewAssets(true)}
+                              className="text-blue-700 hover:underline font-semibold cursor-pointer"
+                            >
+                              Expand all {parsedRawAssets.length} properties ↓
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </div>

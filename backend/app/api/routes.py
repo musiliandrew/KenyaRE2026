@@ -765,6 +765,12 @@ async def ingest_unstructured_file(file: UploadFile = File(...)):
                             "ward": ward
                         })
                     if items:
+                        for a in items:
+                            h_data = hazard_engine.get_hazard_depth(a["lat"], a["lng"], "100y")
+                            a["depth_m"] = round(float(h_data.get("depth_m", 0.0)), 2)
+                            a["hazard_score"] = round(float(h_data.get("hazard_score", 0.0)), 3)
+                            a["tier_label"] = h_data.get("tier_label", "Moderate Pluvial")
+
                         return {
                             "file_name": filename,
                             "file_type": ext,
@@ -820,6 +826,13 @@ async def ingest_unstructured_file(file: UploadFile = File(...)):
                 "tiv_kes": single_tiv,
                 "ward": loc,
             })
+
+    # Enrich all assets with physical pluvial flood depth directly sampled from the calibrated GeoTIFF rasters
+    for a in assets:
+        h_data = hazard_engine.get_hazard_depth(a["lat"], a["lng"], "100y")
+        a["depth_m"] = round(float(h_data.get("depth_m", 0.0)), 2)
+        a["hazard_score"] = round(float(h_data.get("hazard_score", 0.0)), 3)
+        a["tier_label"] = h_data.get("tier_label", "Moderate Pluvial")
 
     return {
         "file_name": filename,
