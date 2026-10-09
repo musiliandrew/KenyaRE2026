@@ -1,7 +1,13 @@
 // Typed API client for the Kenya Re CAT backend (FastAPI).
 // Single source of truth for every network call - no component should call fetch() directly.
 
-export const API_URL = (process.env.NEXT_PUBLIC_API_URL || "https://kenre.netsight.co.ke/").replace(/\/$/, "");
+// Avoid NEXT_PUBLIC_ variables so Vercel keeps the backend URL secure and private.
+// In the browser, calls use same-origin relative URLs (/api/...) and Next.js rewrites proxy them to BACKEND_API_URL.
+export const API_URL = (
+  typeof window !== "undefined"
+    ? ""
+    : (process.env.BACKEND_API_URL || process.env.API_URL || "http://127.0.0.1:8000")
+).replace(/\/$/, "");
 
 export type RP = "5y" | "10y" | "25y" | "50y" | "100y";
 export type HousingClass = "informal_iron_sheet" | "semi_permanent" | "permanent_masonry" | "concrete_rcc";
@@ -172,15 +178,20 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(`${API_URL}/api${path}`, {
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+  const res = await fetch(`${API_URL}/api${cleanPath}`, {
     ...init,
     signal,
-    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+    headers: {
+      "Content-Type": "application/json",
+      "ngrok-skip-browser-warning": "true",
+      ...(init?.headers || {}),
+    },
   });
   if (!res.ok) {
     let detail = res.statusText;
     try { detail = JSON.stringify((await res.json()).detail ?? detail); } catch { /* ignore */ }
-    throw new ApiError(res.status, `${res.status} ${path}: ${detail}`);
+    throw new ApiError(res.status, `${res.status} ${cleanPath}: ${detail}`);
   }
   return res.json() as Promise<T>;
 }
@@ -234,6 +245,7 @@ export const api = {
     formData.append("file", file);
     const res = await fetch(`${API_URL}/api/ai/ingest-file`, {
       method: "POST",
+      headers: { "ngrok-skip-browser-warning": "true" },
       body: formData,
     });
     if (!res.ok) {
@@ -267,7 +279,13 @@ export const api = {
   /** Streams the copilot reply token-by-token; calls onToken for each chunk. */
   chatStream: async (message: string, onToken: (t: string) => void, history?: { role: string; content: string }[], signal?: AbortSignal) => {
     const res = await fetch(`${API_URL}/api/ai/chat/stream`, {
-      method: "POST", signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message, history }),
+      method: "POST",
+      signal,
+      headers: {
+        "Content-Type": "application/json",
+        "ngrok-skip-browser-warning": "true",
+      },
+      body: JSON.stringify({ message, history }),
     });
     if (!res.ok || !res.body) throw new ApiError(res.status, `chat stream failed (${res.status})`);
     const reader = res.body.getReader();
