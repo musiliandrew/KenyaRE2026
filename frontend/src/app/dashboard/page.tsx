@@ -123,14 +123,19 @@ export default function DashboardPage() {
   const [isIngestModalOpen, setIsIngestModalOpen] = useState(false);
   const [selectedAssetForModal, setSelectedAssetForModal] = useState<ExposureAsset | null>(null);
 
-  // Load saved runs from localStorage on mount
+  // Load saved runs from localStorage and sync with Neon Cloud PostgreSQL + PostGIS
   useEffect(() => {
     if (typeof window === "undefined") return;
+    let isMounted = true;
+    let localParsed: DatasetRun[] = [];
+
+    // 1. Instant local cache load
     try {
       const saved = localStorage.getItem("kenya_re_dataset_runs");
       if (saved) {
         const parsed: DatasetRun[] = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
+          localParsed = parsed;
           setRuns(parsed);
         }
       }
@@ -141,6 +146,41 @@ export default function DashboardPage() {
     } catch (e) {
       console.error("Failed to load saved dataset runs from localStorage", e);
     }
+
+    // 2. Fetch all persisted portfolios from Neon PostgreSQL
+    api.listPortfolios().then(async (dbList) => {
+      if (!isMounted || !Array.isArray(dbList)) return;
+      if (dbList.length > 0) {
+        const fullRuns: DatasetRun[] = [];
+        for (const item of dbList) {
+          try {
+            const full = await api.getPortfolio(item.id);
+            if (full && Array.isArray(full.assets)) {
+              fullRuns.push(full);
+            }
+          } catch (err) {
+            console.warn(`Could not load full DB portfolio ${item.id}`, err);
+          }
+        }
+        if (fullRuns.length > 0 && isMounted) {
+          setRuns(fullRuns);
+          try {
+            localStorage.setItem("kenya_re_dataset_runs", JSON.stringify(fullRuns));
+          } catch (e) {}
+        }
+      } else if (localParsed.length > 0) {
+        // If DB is empty but user had local datasets, sync them up to PostgreSQL
+        for (const lr of localParsed) {
+          api.savePortfolio(lr).catch(() => {});
+        }
+      }
+    }).catch((err) => {
+      console.warn("Could not sync portfolios from Neon PostgreSQL:", err);
+    });
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const persistRuns = (newRuns: DatasetRun[]) => {
@@ -164,6 +204,14 @@ export default function DashboardPage() {
     const updated = [newRun, ...filtered];
     persistRuns(updated);
     handleSelectRun(newRun.id);
+
+    // Persist permanently to Neon Cloud PostgreSQL + PostGIS
+    api.savePortfolio(newRun).then(() => {
+      toast.success("Dataset permanently stored in Neon Cloud PostgreSQL + PostGIS.");
+    }).catch((err) => {
+      console.warn("Failed to persist portfolio to database:", err);
+      toast.info("Dataset cached locally in browser.");
+    });
   };
 
   const handleRenameRun = (runId: string, newName: string) => {
@@ -171,6 +219,11 @@ export default function DashboardPage() {
     const updated = runs.map((r) => (r.id === runId ? { ...r, name: newName.trim() } : r));
     persistRuns(updated);
     toast.success("Dataset renamed successfully.");
+
+    // Sync rename to Neon PostgreSQL
+    api.renamePortfolio(runId, newName).catch((err) => {
+      console.warn("Failed to sync rename to database:", err);
+    });
   };
 
   const handleDownloadRunCSV = (run: DatasetRun) => {
@@ -206,6 +259,11 @@ export default function DashboardPage() {
       handleSelectRun(updated.length > 1 ? "all" : updated.length === 1 ? updated[0].id : "baseline");
     }
     toast.success("Dataset removed from saved records.");
+
+    // Sync delete to Neon PostgreSQL (cascade deletes exposure assets)
+    api.deletePortfolio(runId).catch((err) => {
+      console.warn("Failed to sync delete to database:", err);
+    });
   };
 
   // Live backend data hooks (Baseline)
@@ -2238,6 +2296,12 @@ function RepositoryPanel({
           <p className="text-xs sm:text-sm text-slate-600">
             View stored exposure files, inspect upload timestamps, rename datasets, download CSV schedules, and toggle active simulation scopes.
           </p>
+          <div className="flex items-center gap-2 mt-1.5">
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full shadow-2xs">
+              <span className="size-1.5 rounded-full bg-emerald-600 animate-pulse" />
+              Neon Cloud PostgreSQL + PostGIS (Active & Persistent)
+            </span>
+          </div>
         </div>
         <Button
           onClick={onOpenIngestModal}

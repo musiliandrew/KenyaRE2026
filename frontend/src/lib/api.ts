@@ -282,6 +282,27 @@ export const api = {
     request<AssetDossierResponse>(`/exposure/asset/${encodeURIComponent(locId)}${qs({ return_period: rp })}`, undefined, s),
   calculateAssetDossier: (payload: { asset: any; return_period?: RP; portfolio_assets?: any[] }, s?: AbortSignal) =>
     request<AssetDossierResponse>("/exposure/asset/dossier", { method: "POST", body: JSON.stringify(payload) }, s),
+  
+  // Neon Cloud PostgreSQL + PostGIS Storage
+  dbStats: () => request<{ status: string; database: string; portfolios_count: number; assets_count: number; quotes_count: number }>("/db/stats"),
+  listPortfolios: () => request<any[]>("/db/portfolios"),
+  savePortfolio: (payload: any) => request<{ id: string; name: string; asset_count: number; total_tiv_kes: number; status: string }>("/db/portfolios", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }),
+  getPortfolio: (id: string) => request<any>(`/db/portfolios/${encodeURIComponent(id)}`),
+  renamePortfolio: (id: string, name: string) => request<{ id: string; name: string; status: string }>(`/db/portfolios/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  }),
+  deletePortfolio: (id: string) => request<{ id: string; status: string }>(`/db/portfolios/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  }),
+  saveQuote: (payload: any) => request<{ id: string; status: string }>("/db/quotes", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }),
+  listQuotes: () => request<any[]>("/db/quotes"),
 };
 
 export interface AssetDossierResponse {

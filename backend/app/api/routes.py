@@ -836,3 +836,89 @@ async def ingest_unstructured_file(file: UploadFile = File(...)):
     }
 
 
+# ============================================================================
+# PERSISTENT DATABASE ENDPOINTS (Neon Cloud PostgreSQL + PostGIS)
+# ============================================================================
+
+from app.services.db_service import db_service
+
+@router.get("/db/stats", tags=["Database: Neon PostgreSQL"])
+async def get_database_stats():
+    """
+    Returns real-time connection status and counts for portfolios and assets stored in Neon PostgreSQL.
+    """
+    return await db_service.get_stats()
+
+
+@router.get("/db/portfolios", tags=["Database: Neon PostgreSQL"])
+async def list_stored_portfolios():
+    """
+    Retrieves all portfolios stored in PostgreSQL ordered by update time.
+    """
+    return await db_service.list_portfolios()
+
+
+@router.post("/db/portfolios", tags=["Database: Neon PostgreSQL"])
+async def save_stored_portfolio(payload: Dict[str, Any]):
+    """
+    Saves or updates a complete portfolio run and all its geocoded exposure assets into PostgreSQL.
+    Inserts PostGIS Point geometry (SRID 4326) for each asset.
+    """
+    try:
+        return await db_service.save_portfolio(payload)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save portfolio to database: {str(e)}")
+
+
+@router.get("/db/portfolios/{portfolio_id}", tags=["Database: Neon PostgreSQL"])
+async def get_stored_portfolio(portfolio_id: str):
+    """
+    Retrieves a complete stored portfolio dossier including all exposure assets and computed summaries.
+    """
+    portfolio = await db_service.get_portfolio(portfolio_id)
+    if not portfolio:
+        raise HTTPException(status_code=404, detail=f"Portfolio '{portfolio_id}' not found in database.")
+    return portfolio
+
+
+@router.patch("/db/portfolios/{portfolio_id}", tags=["Database: Neon PostgreSQL"])
+async def rename_stored_portfolio(portfolio_id: str, payload: Dict[str, str]):
+    """
+    Renames a stored portfolio.
+    """
+    new_name = payload.get("name")
+    if not new_name:
+        raise HTTPException(status_code=400, detail="Missing 'name' field in payload.")
+    success = await db_service.rename_portfolio(portfolio_id, new_name)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Portfolio '{portfolio_id}' not found or rename failed.")
+    return {"id": portfolio_id, "name": new_name, "status": "updated"}
+
+
+@router.delete("/db/portfolios/{portfolio_id}", tags=["Database: Neon PostgreSQL"])
+async def delete_stored_portfolio(portfolio_id: str):
+    """
+    Deletes a portfolio and all linked assets (cascade delete) from PostgreSQL.
+    """
+    success = await db_service.delete_portfolio(portfolio_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Portfolio '{portfolio_id}' not found or delete failed.")
+    return {"id": portfolio_id, "status": "deleted"}
+
+
+@router.get("/db/quotes", tags=["Database: Neon PostgreSQL"])
+async def list_stored_quotes():
+    """
+    Retrieves treaty underwriting quotes saved in PostgreSQL.
+    """
+    return await db_service.list_treaty_quotes()
+
+
+@router.post("/db/quotes", tags=["Database: Neon PostgreSQL"])
+async def save_stored_quote(payload: Dict[str, Any]):
+    """
+    Saves a treaty underwriting quote into PostgreSQL.
+    """
+    return await db_service.save_treaty_quote(payload)
+
+

@@ -20,6 +20,15 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = "gpt-4o-mini"
     MAPBOX_ACCESS_TOKEN: str = ""
 
+    # Database (Neon Cloud PostgreSQL + PostGIS)
+    DATABASE_URL: str = ""
+    DATABASE_URL_UNPOOLED: str = ""
+    PGHOST: str = ""
+    PGHOST_UNPOOLED: str = ""
+    PGUSER: str = ""
+    PGDATABASE: str = ""
+    PGPASSWORD: str = ""
+
     @property
     def cors_origin_list(self) -> List[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]

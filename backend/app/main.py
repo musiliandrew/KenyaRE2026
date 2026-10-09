@@ -1,12 +1,23 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
+from app.core.database import init_db, close_db
 from app.api.routes import router as api_router
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: initialize database tables and extensions
+    await init_db()
+    yield
+    # Shutdown: cleanly close pool
+    await close_db()
 
 app = FastAPI(
     title="Kenya Re · Catastrophe Risk Intelligence Platform API",
     description="Actuarial loss engine, JRC depth-damage functions, and AI exposure parser for Team A (Nairobi Urban Flood Challenge).",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # CORS Middleware for Next.js frontend communication
